@@ -1,0 +1,18 @@
+[package]
+name = "sshcore"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SSH Box 内核：配置、凭据、主机指纹、会话与 PTY"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+russh = { workspace = true }
+keyring = { workspace = true }
+dirs = { workspace = true }
+async-trait = { workspace = true }
+rand = { workspace = true }

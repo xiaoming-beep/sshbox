@@ -1,0 +1,17 @@
+[package]
+name = "sshbox-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SSH Box 命令行（M1 内核验证工具）"
+
+[[bin]]
+name = "sshbox-cli"
+path = "src/main.rs"
+
+[dependencies]
+sshcore = { path = "../sshcore" }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }

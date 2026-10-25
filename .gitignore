@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / Tauri
+node_modules/
+dist/
+apps/desktop/src-tauri/target/
+apps/desktop/dist/
+pnpm-lock.yaml.bak
+
+# 本地运行产物
+*.log
+.runtime/
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+logs/
+*.err
+

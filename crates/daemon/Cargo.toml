@@ -1,0 +1,17 @@
+[package]
+name = "sshbox-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SSH Box 本地 HTTP 服务（给 AI 客户端用）"
+
+[dependencies]
+sshcore = { path = "../sshcore" }
+axum = "0.7"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+futures-util = { workspace = true }
+tokio-stream = { workspace = true }
