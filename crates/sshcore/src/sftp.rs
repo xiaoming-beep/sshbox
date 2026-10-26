@@ -4,7 +4,7 @@
 //! 写入类操作（上传/删除/重命名）留到下一版，配合路径白名单与界面审批。
 
 use serde::Serialize;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::error::{Error, Result};
 use crate::pty::ConnectionHandle;
@@ -136,4 +136,59 @@ pub async fn read_file(handle: &ConnectionHandle, path: &str, max_bytes: usize) 
         buf.truncate(max_bytes);
     }
     Ok(buf)
+}
+
+/// 判断远端路径是否存在
+pub async fn exists(handle: &ConnectionHandle, path: &str) -> bool {
+    let Ok(path) = normalize(path) else {
+        return false;
+    };
+    match connect(handle).await {
+        Ok(sftp) => sftp.metadata(path).await.is_ok(),
+        Err(_) => false,
+    }
+}
+
+/// 写入远端文件（覆盖）。调用方负责路径策略与大小校验。
+pub async fn write_file(handle: &ConnectionHandle, path: &str, data: &[u8]) -> Result<()> {
+    let path = normalize(path)?;
+    let sftp = connect(handle).await?;
+    let mut file = sftp
+        .create(path)
+        .await
+        .map_err(|err| Error::Other(format!("创建远端文件失败（{path}）：{err}")))?;
+    file.write_all(data)
+        .await
+        .map_err(|err| Error::Other(format!("写入失败（{path}）：{err}")))?;
+    let _ = file.flush().await;
+    Ok(())
+}
+
+pub async fn mkdir(handle: &ConnectionHandle, path: &str) -> Result<()> {
+    let path = normalize(path)?;
+    let sftp = connect(handle).await?;
+    sftp.create_dir(path)
+        .await
+        .map_err(|err| Error::Other(format!("创建目录失败（{path}）：{err}")))
+}
+
+/// 删除：先按文件删，失败再按空目录删
+pub async fn remove(handle: &ConnectionHandle, path: &str) -> Result<()> {
+    let path = normalize(path)?;
+    let sftp = connect(handle).await?;
+    if sftp.remove_file(path).await.is_ok() {
+        return Ok(());
+    }
+    sftp.remove_dir(path)
+        .await
+        .map_err(|err| Error::Other(format!("删除失败（{path}）：{err}")))
+}
+
+pub async fn rename(handle: &ConnectionHandle, from: &str, to: &str) -> Result<()> {
+    let from = normalize(from)?;
+    let to = normalize(to)?;
+    let sftp = connect(handle).await?;
+    sftp.rename(from, to)
+        .await
+        .map_err(|err| Error::Other(format!("重命名失败（{from} → {to}）：{err}")))
 }

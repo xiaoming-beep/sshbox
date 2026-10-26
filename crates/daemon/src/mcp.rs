@@ -257,6 +257,62 @@ fn tool_definitions() -> Vec<Value> {
                 "additionalProperties": false
             },
         }),
+        json!({
+            "name": "sftp_write",
+            "description": "写远端文件（文本或 base64）。受连接级策略限制：只有配置了可写前缀的路径才允许；已存在且 overwrite 不为 true 时拒绝。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "path": { "type": "string", "description": "绝对路径" },
+                    "text": { "type": "string", "description": "文本内容（与 base64 二选一）" },
+                    "base64": { "type": "string", "description": "二进制内容的 base64（与 text 二选一）" },
+                    "overwrite": { "type": "boolean", "description": "为 true 时允许覆盖已存在的文件，默认 false" }
+                },
+                "required": ["sessionId", "path"],
+                "additionalProperties": false
+            },
+        }),
+        json!({
+            "name": "sftp_mkdir",
+            "description": "在远端创建目录（受可写前缀限制）。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "path": { "type": "string" }
+                },
+                "required": ["sessionId", "path"],
+                "additionalProperties": false
+            },
+        }),
+        json!({
+            "name": "sftp_remove",
+            "description": "删除远端文件或空目录（受可写前缀限制）。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "path": { "type": "string" }
+                },
+                "required": ["sessionId", "path"],
+                "additionalProperties": false
+            },
+        }),
+        json!({
+            "name": "sftp_rename",
+            "description": "重命名/移动远端文件（源与目标都必须在可写前缀内）。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "from": { "type": "string" },
+                    "to": { "type": "string" }
+                },
+                "required": ["sessionId", "from", "to"],
+                "additionalProperties": false
+            },
+        }),
     ]
 }
 
@@ -286,6 +342,10 @@ async fn call_tool(sessions: &Arc<SessionManager>, params: &Value) -> Result<Val
         "sftp_list" => sftp_list_tool(sessions, &args).await,
         "sftp_stat" => sftp_stat_tool(sessions, &args).await,
         "sftp_read" => sftp_read_tool(sessions, &args).await,
+        "sftp_write" => sftp_write_tool(sessions, &args).await,
+        "sftp_mkdir" => sftp_mkdir_tool(sessions, &args).await,
+        "sftp_remove" => sftp_remove_tool(sessions, &args).await,
+        "sftp_rename" => sftp_rename_tool(sessions, &args).await,
         other => Err(format!("未知工具：{other}")),
     };
 
@@ -816,6 +876,68 @@ async fn sftp_read_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<
         })
         .to_string()),
     }
+}
+
+async fn sftp_write_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
+    let session_id = arg_str(args, "sessionId")?;
+    let path = arg_str(args, "path")?;
+    let overwrite = args
+        .get("overwrite")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let data = match (args.get("base64").and_then(|v| v.as_str()), args.get("text").and_then(|v| v.as_str())) {
+        (Some(encoded), _) => base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| format!("base64 解码失败：{e}"))?,
+        (None, Some(text)) => text.as_bytes().to_vec(),
+        (None, None) => return Err("text 与 base64 至少给一个".to_string()),
+    };
+
+    if !overwrite && sessions.sftp_exists(session_id, path).await.map_err(|e| e.to_string())? {
+        return Err(format!(
+            "{path} 已存在；如确认覆盖请传 overwrite=true"
+        ));
+    }
+
+    let bytes = data.len();
+    sessions
+        .sftp_write(session_id, path, data)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(json!({ "written": true, "bytes": bytes, "path": path }).to_string())
+}
+
+async fn sftp_mkdir_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
+    let session_id = arg_str(args, "sessionId")?;
+    let path = arg_str(args, "path")?;
+    sessions
+        .sftp_mkdir(session_id, path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({ "created": true, "path": path }).to_string())
+}
+
+async fn sftp_remove_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
+    let session_id = arg_str(args, "sessionId")?;
+    let path = arg_str(args, "path")?;
+    sessions
+        .sftp_remove(session_id, path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({ "removed": true, "path": path }).to_string())
+}
+
+async fn sftp_rename_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
+    let session_id = arg_str(args, "sessionId")?;
+    let from = arg_str(args, "from")?;
+    let to = arg_str(args, "to")?;
+    sessions
+        .sftp_rename(session_id, from, to)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({ "renamed": true, "from": from, "to": to }).to_string())
 }
 
 async fn close_session(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {

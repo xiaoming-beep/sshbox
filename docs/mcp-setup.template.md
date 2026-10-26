@@ -107,6 +107,10 @@ Invoke-RestMethod $ep -Method Post -Headers $h -ContentType 'application/json' `
 | `sftp_list` | 列远端目录（只读） |
 | `sftp_stat` | 查看远端文件/目录属性（只读） |
 | `sftp_read` | 读远端小文件（只读，默认 64KB 上限） |
+| `sftp_write` | 写远端文件（仅限可写前缀） |
+| `sftp_mkdir` | 建远端目录 |
+| `sftp_remove` | 删除远端文件或空目录 |
+| `sftp_rename` | 重命名/移动 |
 | `close_session` | 关闭会话 |
 
 ### 等待命令结束的正确姿势

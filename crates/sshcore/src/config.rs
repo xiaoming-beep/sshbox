@@ -92,6 +92,44 @@ pub struct Connection {
     /// group / shellCommand），也让新旧版本可以混跑
     #[serde(flatten, default)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+    /// SFTP 写入策略（缺省 = 禁止一切写入）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sftp: Option<SftpPolicy>,
+}
+
+fn default_max_write_bytes() -> u64 {
+    4 * 1024 * 1024
+}
+
+/// SFTP 写入策略。空 `write_paths` 意味着任何写入都被拒绝。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpPolicy {
+    /// 允许写入的远端路径前缀（绝对路径），例如 ["/tmp", "/root/uploads"]
+    #[serde(default)]
+    pub write_paths: Vec<String>,
+    /// 单次写入上限（字节），默认 4MB
+    #[serde(default = "default_max_write_bytes")]
+    pub max_write_bytes: u64,
+}
+
+impl Default for SftpPolicy {
+    fn default() -> Self {
+        Self {
+            write_paths: Vec::new(),
+            max_write_bytes: default_max_write_bytes(),
+        }
+    }
+}
+
+impl SftpPolicy {
+    /// 路径是否在允许写入的前缀之下（按路径段匹配，`/tmpfoo` 不算 `/tmp`）
+    pub fn allows(&self, path: &str) -> bool {
+        self.write_paths.iter().any(|prefix| {
+            let prefix = prefix.trim_end_matches('/');
+            path == prefix || path.starts_with(&format!("{prefix}/"))
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

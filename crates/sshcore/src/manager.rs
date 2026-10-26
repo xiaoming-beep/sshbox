@@ -332,6 +332,89 @@ impl SessionManager {
         crate::sftp::read_file(&handle, path, max_bytes).await
     }
 
+    /// 取会话对应的连接配置（用于写入策略校验）
+    async fn connection_of(&self, id: &str) -> Result<Connection> {
+        let connection_id = {
+            let guard = self.sessions.read().await;
+            let entry = guard
+                .get(id)
+                .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
+            entry.info.connection_id.clone()
+        };
+        let store = ConnectionStore::load(&self.paths.connections_file())?;
+        Ok(store.get(&connection_id)?.clone())
+    }
+
+    /// 写入前校验：绝对路径、禁止 `..`、必须在可写前缀内、不超大小上限
+    fn ensure_writable(
+        policy: &crate::config::SftpPolicy,
+        path: &str,
+        size: u64,
+    ) -> Result<()> {
+        let path = path.trim();
+        if !path.starts_with('/') {
+            return Err(Error::Other("写入路径必须是绝对路径".to_string()));
+        }
+        if path.contains('\0') || path.split('/').any(|segment| segment == "..") {
+            return Err(Error::Other("写入路径不能包含 .. 或非法字符".to_string()));
+        }
+        if !policy.allows(path) {
+            let scope = if policy.write_paths.is_empty() {
+                "（该连接未配置可写路径，写入一律拒绝）".to_string()
+            } else {
+                format!("（允许写入：{}）", policy.write_paths.join(", "))
+            };
+            return Err(Error::Other(format!("路径 {path} 不在可写范围内{scope}")));
+        }
+        if size > policy.max_write_bytes {
+            return Err(Error::Other(format!(
+                "内容 {size} 字节，超过单次写入上限 {}",
+                policy.max_write_bytes
+            )));
+        }
+        Ok(())
+    }
+
+    /// 写远端文件（覆盖），受连接级策略限制
+    pub async fn sftp_write(&self, id: &str, path: &str, data: Vec<u8>) -> Result<()> {
+        let conn = self.connection_of(id).await?;
+        let policy = conn.sftp.clone().unwrap_or_default();
+        Self::ensure_writable(&policy, path, data.len() as u64)?;
+        let handle = self.connection_handle(id).await?;
+        crate::sftp::write_file(&handle, path, &data).await
+    }
+
+    pub async fn sftp_mkdir(&self, id: &str, path: &str) -> Result<()> {
+        let conn = self.connection_of(id).await?;
+        let policy = conn.sftp.clone().unwrap_or_default();
+        Self::ensure_writable(&policy, path, 0)?;
+        let handle = self.connection_handle(id).await?;
+        crate::sftp::mkdir(&handle, path).await
+    }
+
+    pub async fn sftp_remove(&self, id: &str, path: &str) -> Result<()> {
+        let conn = self.connection_of(id).await?;
+        let policy = conn.sftp.clone().unwrap_or_default();
+        Self::ensure_writable(&policy, path, 0)?;
+        let handle = self.connection_handle(id).await?;
+        crate::sftp::remove(&handle, path).await
+    }
+
+    pub async fn sftp_rename(&self, id: &str, from: &str, to: &str) -> Result<()> {
+        let conn = self.connection_of(id).await?;
+        let policy = conn.sftp.clone().unwrap_or_default();
+        Self::ensure_writable(&policy, from, 0)?;
+        Self::ensure_writable(&policy, to, 0)?;
+        let handle = self.connection_handle(id).await?;
+        crate::sftp::rename(&handle, from, to).await
+    }
+
+    /// 远端路径是否已存在（供写入时判断是否需要 overwrite）
+    pub async fn sftp_exists(&self, id: &str, path: &str) -> Result<bool> {
+        let handle = self.connection_handle(id).await?;
+        Ok(crate::sftp::exists(&handle, path).await)
+    }
+
     async fn connect_params(
         &self,
         connection_id: &str,

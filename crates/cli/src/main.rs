@@ -186,6 +186,7 @@ fn cmd_add(
         group: String::new(),
         tags: vec![],
         extra: Default::default(),
+        sftp: None,
     });
     store.save(&path)?;
 
