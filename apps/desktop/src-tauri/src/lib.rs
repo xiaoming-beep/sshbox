@@ -231,6 +231,87 @@ async fn close_session(state: State<'_, AppState>, id: String) -> CmdResult<()> 
     Ok(())
 }
 
+// ---------------------------------------------------------------- 文件（SFTP 只读）
+
+#[tauri::command]
+async fn sftp_list(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> CmdResult<Vec<sshcore::sftp::SftpEntry>> {
+    Ok(state.sessions.sftp_list(&id, &path).await?)
+}
+
+#[tauri::command]
+async fn sftp_stat(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> CmdResult<sshcore::sftp::SftpEntry> {
+    Ok(state.sessions.sftp_stat(&id, &path).await?)
+}
+
+/// 下载到本地 Downloads 目录，返回落盘路径
+#[tauri::command]
+async fn sftp_download(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> CmdResult<String> {
+    const MAX_BYTES: usize = 64 * 1024 * 1024;
+    let data = state.sessions.sftp_read(&id, &path, MAX_BYTES).await?;
+
+    let name = path
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or("download");
+
+    let dir = download_dir();
+    std::fs::create_dir_all(&dir).map_err(|err| CmdError::Message {
+        message: format!("创建下载目录失败：{err}"),
+    })?;
+
+    let target = unique_path(&dir, name);
+    std::fs::write(&target, &data).map_err(|err| CmdError::Message {
+        message: format!("写入本地文件失败：{err}"),
+    })?;
+
+    Ok(target.display().to_string())
+}
+
+fn download_dir() -> std::path::PathBuf {
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let downloads = std::path::Path::new(&profile).join("Downloads");
+        if downloads.is_dir() {
+            return downloads;
+        }
+    }
+    std::env::temp_dir()
+}
+
+/// 同名文件不覆盖，自动加 (1)(2)…
+fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = std::path::Path::new(name);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = path.extension().and_then(|s| s.to_str());
+    for index in 1..1000 {
+        let file_name = match ext {
+            Some(ext) => format!("{stem} ({index}).{ext}"),
+            None => format!("{stem} ({index})"),
+        };
+        let candidate = dir.join(file_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(name)
+}
+
 // ---------------------------------------------------------------- 工具
 
 fn slug(name: &str, host: &str) -> String {
@@ -453,6 +534,9 @@ pub fn run() {
             session_read,
             session_resize,
             close_session,
+            sftp_list,
+            sftp_stat,
+            sftp_download,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 启动失败");

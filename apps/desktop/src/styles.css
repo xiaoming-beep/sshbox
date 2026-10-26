@@ -531,3 +531,145 @@ select:focus {
   cursor: pointer;
   z-index: 30;
 }
+
+/* ------------------------------------------------------------ 主区域结构 */
+
+.main-head {
+  display: flex;
+  align-items: stretch;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.main-head .tabs {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+}
+
+.files-toggle {
+  align-self: center;
+  margin: 0 8px;
+}
+
+.files-toggle.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.main-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.main-body .term-area {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------ 文件面板 */
+
+.file-drawer {
+  width: 340px;
+  flex: 0 0 340px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.fb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.fb-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.fb-path {
+  padding: 6px 10px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.fb-hint {
+  padding: 4px 10px;
+}
+
+.fb-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.fb-row:hover {
+  background: var(--panel-2);
+}
+
+.fb-row.selected {
+  background: #24304a;
+}
+
+.fb-icon {
+  font-size: 12px;
+}
+
+.fb-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-size {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.fb-time {
+  color: var(--muted);
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+
+.fb-dl {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.fb-foot {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  word-break: break-all;
+}

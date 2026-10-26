@@ -38,6 +38,15 @@ export interface CommandRecord {
   redacted: boolean;
 }
 
+export interface SftpEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  mode: number | null;
+  modified: number | null;
+}
+
 export interface DaemonInfo {
   port: number;
   token: string;
@@ -109,6 +118,9 @@ export const api = {
   resize: (id: string, cols: number, rows: number) =>
     invoke<void>("session_resize", { id, cols, rows }),
   closeSession: (id: string) => invoke<void>("close_session", { id }),
+  sftpList: (id: string, path: string) => invoke<SftpEntry[]>("sftp_list", { id, path }),
+  sftpStat: (id: string, path: string) => invoke<SftpEntry>("sftp_stat", { id, path }),
+  sftpDownload: (id: string, path: string) => invoke<string>("sftp_download", { id, path }),
   debugLog: (message: string) => invoke<void>("debug_log", { message }),
 };
 

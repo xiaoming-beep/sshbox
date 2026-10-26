@@ -5,6 +5,7 @@ import Sidebar from "./components/Sidebar";
 import TerminalTabs from "./components/TerminalTabs";
 import TerminalPane from "./components/TerminalPane";
 import CommandPanel from "./components/CommandPanel";
+import FileBrowser from "./components/FileBrowser";
 import ConnectionDialog from "./components/ConnectionDialog";
 
 interface PendingHost {
@@ -24,6 +25,7 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [daemon, setDaemon] = useState<DaemonInfo | null>(null);
   const [showService, setShowService] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -159,12 +161,23 @@ export default function App() {
       />
 
       <main className="main">
-        <TerminalTabs
-          sessions={sessions}
-          activeId={activeId}
-          onSelect={setActiveId}
-          onClose={closeSession}
-        />
+        <div className="main-head">
+          <TerminalTabs
+            sessions={sessions}
+            activeId={activeId}
+            onSelect={setActiveId}
+            onClose={closeSession}
+          />
+          <button
+            className={`btn-ghost files-toggle ${showFiles ? "active" : ""}`}
+            onClick={() => setShowFiles((prev) => !prev)}
+            disabled={!activeId}
+            title={activeId ? "浏览当前会话主机的文件" : "先打开一个会话"}
+          >
+            文件
+          </button>
+        </div>
+        <div className="main-body">
         <div className="term-area">
           {sessions.length === 0 && (
             <div className="empty">
@@ -184,6 +197,10 @@ export default function App() {
               <CommandPanel sessionId={session.id} />
             </div>
           ))}
+        </div>
+          {showFiles && activeId && (
+            <FileBrowser sessionId={activeId} onClose={() => setShowFiles(false)} />
+          )}
         </div>
       </main>
 
