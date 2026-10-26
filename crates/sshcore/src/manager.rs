@@ -197,6 +197,8 @@ pub(crate) struct Entry {
     state: Arc<Mutex<TerminalState>>,
     /// vt100 解析器：把字节流渲染成屏幕，供 AI 阅读
     screen: Arc<Mutex<Parser>>,
+    /// 共享的 SSH 连接句柄（SFTP 等子系统用，不额外开 TCP）
+    handle: crate::pty::ConnectionHandle,
 }
 
 pub struct SessionManager {
@@ -303,6 +305,33 @@ impl SessionManager {
         Ok(list)
     }
 
+    /// 取会话的 SSH 连接句柄（SFTP 等子系统复用同一条 TCP 连接）
+    async fn connection_handle(&self, id: &str) -> Result<crate::pty::ConnectionHandle> {
+        let guard = self.sessions.read().await;
+        let entry = guard
+            .get(id)
+            .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
+        Ok(Arc::clone(&entry.handle))
+    }
+
+    /// 列出远端目录（只读）
+    pub async fn sftp_list(&self, id: &str, path: &str) -> Result<Vec<crate::sftp::SftpEntry>> {
+        let handle = self.connection_handle(id).await?;
+        crate::sftp::list_dir(&handle, path).await
+    }
+
+    /// 查看远端文件/目录属性（只读）
+    pub async fn sftp_stat(&self, id: &str, path: &str) -> Result<crate::sftp::SftpEntry> {
+        let handle = self.connection_handle(id).await?;
+        crate::sftp::stat(&handle, path).await
+    }
+
+    /// 读取远端文件（只读，带大小上限）
+    pub async fn sftp_read(&self, id: &str, path: &str, max_bytes: usize) -> Result<Vec<u8>> {
+        let handle = self.connection_handle(id).await?;
+        crate::sftp::read_file(&handle, path, max_bytes).await
+    }
+
     async fn connect_params(
         &self,
         connection_id: &str,
@@ -390,6 +419,7 @@ impl SessionManager {
             ..Default::default()
         }));
         let screen = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 0)));
+        let connection = session.handle();
         let (tx, rx) = mpsc::unbounded_channel();
 
         self.sessions.write().await.insert(
@@ -402,6 +432,7 @@ impl SessionManager {
                 backlog: Arc::clone(&backlog),
                 state: Arc::clone(&state),
                 screen: Arc::clone(&screen),
+                handle: connection,
             },
         );
 

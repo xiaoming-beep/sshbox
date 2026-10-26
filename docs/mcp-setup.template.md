@@ -104,6 +104,9 @@ Invoke-RestMethod $ep -Method Post -Headers $h -ContentType 'application/json' `
 | `wait_for` | 等提示符 / 等静默 / 等文本 |
 | `interrupt` | 发送 Ctrl-C |
 | `get_history` | 命令流水（来源 / 退出码 / 耗时） |
+| `sftp_list` | 列远端目录（只读） |
+| `sftp_stat` | 查看远端文件/目录属性（只读） |
+| `sftp_read` | 读远端小文件（只读，默认 64KB 上限） |
 | `close_session` | 关闭会话 |
 
 ### 等待命令结束的正确姿势

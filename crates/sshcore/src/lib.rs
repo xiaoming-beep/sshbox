@@ -11,6 +11,7 @@ pub mod known_hosts;
 pub mod manager;
 pub mod osc;
 pub mod pty;
+pub mod sftp;
 
 pub use config::{AppPaths, AuthKind, Connection, ConnectionStore};
 pub use error::{Error, Result};

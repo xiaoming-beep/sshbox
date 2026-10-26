@@ -48,7 +48,7 @@ pub struct ObservedHostKey {
     pub known: bool,
 }
 
-struct ClientHandler {
+pub(crate) struct ClientHandler {
     host: String,
     port: u16,
     known: Arc<KnownHosts>,
@@ -102,7 +102,10 @@ pub enum ChannelEvent {
     Closed,
 }
 
-type SessionHandle = Handle<ClientHandler>;
+type SessionHandle = Arc<Handle<ClientHandler>>;
+
+/// 供 SFTP 等子系统复用的连接句柄
+pub(crate) type ConnectionHandle = SessionHandle;
 
 /// 注入远端的 shell integration 片段。
 ///
@@ -181,7 +184,7 @@ async fn establish(params: &ConnectParams) -> Result<(SessionHandle, ObservedHos
     }
 
     let obs = observed.lock().map(|g| g.clone()).unwrap_or_default();
-    Ok((handle, obs))
+    Ok((Arc::new(handle), obs))
 }
 
 pub struct PtySession {
@@ -220,12 +223,16 @@ pub async fn open_pty_with(
     Ok(PtySession {
         id: crate::new_session_id(),
         fingerprint: observed.fingerprint,
-        handle,
+        handle: handle,
         channel,
     })
 }
 
 impl PtySession {
+    /// 共享的连接句柄（用于开 SFTP 等子系统 channel）
+    pub fn handle(&self) -> ConnectionHandle {
+        Arc::clone(&self.handle)
+    }
     /// 注入 shell integration（OSC 133）。
     ///
     /// 只对 bash / zsh 生效；busybox ash、dash 等无钩子的 shell 会静默降级

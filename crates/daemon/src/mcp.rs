@@ -9,6 +9,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -215,6 +217,46 @@ fn tool_definitions() -> Vec<Value> {
                 "additionalProperties": false
             },
         }),
+        json!({
+            "name": "sftp_list",
+            "description": "列出远端目录（只读）。返回 name / path / isDir / size / mode / modified。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "path": { "type": "string", "description": "目录路径；缺省为登录用户的 home（.）" }
+                },
+                "required": ["sessionId"],
+                "additionalProperties": false
+            },
+        }),
+        json!({
+            "name": "sftp_stat",
+            "description": "查看远端文件或目录的属性（只读）。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "path": { "type": "string" }
+                },
+                "required": ["sessionId", "path"],
+                "additionalProperties": false
+            },
+        }),
+        json!({
+            "name": "sftp_read",
+            "description": "读取远端小文件（只读）。文本以 text 返回，二进制以 base64 返回；默认上限 64KB。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "path": { "type": "string" },
+                    "maxBytes": { "type": "integer", "description": "最大读取字节数，默认 65536" }
+                },
+                "required": ["sessionId", "path"],
+                "additionalProperties": false
+            },
+        }),
     ]
 }
 
@@ -241,6 +283,9 @@ async fn call_tool(sessions: &Arc<SessionManager>, params: &Value) -> Result<Val
         "interrupt" => interrupt(sessions, &args).await,
         "get_history" => get_history(sessions, &args).await,
         "close_session" => close_session(sessions, &args).await,
+        "sftp_list" => sftp_list_tool(sessions, &args).await,
+        "sftp_stat" => sftp_stat_tool(sessions, &args).await,
+        "sftp_read" => sftp_read_tool(sessions, &args).await,
         other => Err(format!("未知工具：{other}")),
     };
 
@@ -726,6 +771,51 @@ async fn get_history(sessions: &Arc<SessionManager>, args: &Value) -> Result<Str
         .await
         .map_err(|e| e.to_string())?;
     Ok(serde_json::to_string_pretty(&records).unwrap_or_else(|_| "[]".into()))
+}
+
+async fn sftp_list_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
+    let session_id = arg_str(args, "sessionId")?;
+    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+    let entries = sessions
+        .sftp_list(session_id, path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".into()))
+}
+
+async fn sftp_stat_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
+    let session_id = arg_str(args, "sessionId")?;
+    let path = arg_str(args, "path")?;
+    let entry = sessions
+        .sftp_stat(session_id, path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::to_string_pretty(&entry).unwrap_or_default())
+}
+
+async fn sftp_read_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
+    let session_id = arg_str(args, "sessionId")?;
+    let path = arg_str(args, "path")?;
+    let max_bytes = args
+        .get("maxBytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(65_536) as usize;
+
+    let data = sessions
+        .sftp_read(session_id, path, max_bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    let bytes = data.len();
+
+    match String::from_utf8(data) {
+        Ok(text) => Ok(json!({ "text": text, "bytes": bytes, "encoding": "utf8" }).to_string()),
+        Err(err) => Ok(json!({
+            "base64": base64::engine::general_purpose::STANDARD.encode(err.into_bytes()),
+            "bytes": bytes,
+            "encoding": "base64",
+        })
+        .to_string()),
+    }
 }
 
 async fn close_session(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
