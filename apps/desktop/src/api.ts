@@ -34,6 +34,8 @@ export interface CommandRecord {
   exitCode: number | null;
   /** 执行耗时（毫秒） */
   durationMs: number | null;
+  /** 敏感输入（密码等），内容已隐去 */
+  redacted: boolean;
 }
 
 export interface DaemonInfo {

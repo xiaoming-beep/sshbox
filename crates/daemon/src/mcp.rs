@@ -163,6 +163,7 @@ fn tool_definitions() -> Vec<Value> {
                     "kind": { "type": "string", "enum": ["prompt", "idle", "pattern"], "description": "默认 prompt，若 integration 未生效则自动退化为 idle 并在结果里说明" },
                     "pattern": { "type": "string", "description": "kind=pattern 时必须提供，按子串匹配" },
                     "cursor": { "type": "integer", "description": "可选：显式指定起始游标，默认从当前位置开始" },
+                    "lookbackBytes": { "type": "integer", "description": "不传 cursor 时往回多扫多少字节（如 4096），用于命令输出早于本次调用到达的情况" },
                     "idleMs": { "type": "integer", "description": "kind=idle 的静默阈值，默认 1200ms" },
                     "timeoutMs": { "type": "integer", "description": "超时毫秒，默认 20000" },
                     "maxBytes": { "type": "integer", "description": "返回文本上限，默认 8192" }
@@ -289,6 +290,14 @@ fn key_bytes(name: &str) -> Option<Vec<u8>> {
                 '_' => return Some(vec![0x1f]),
                 _ => {}
             }
+        }
+    }
+    // 单字符字面量（如 "d"、":"）直接原样发送，方便 tmux 前缀键这类序列
+    let mut chars = lower.chars();
+    if let (Some(ch), None) = (chars.next(), chars.next()) {
+        if !ch.is_control() {
+            let mut buf = [0u8; 4];
+            return Some(ch.encode_utf8(&mut buf).as_bytes().to_vec());
         }
     }
     None
@@ -430,15 +439,11 @@ async fn send_input(sessions: &Arc<SessionManager>, args: &Value) -> Result<Stri
         return Err("text 与 keys 至少给一个".to_string());
     }
 
-    let mut bytes = text.as_bytes().to_vec();
-    bytes.extend_from_slice(&key_bytes);
-    if enter {
-        bytes.push(b'\r');
-    }
-
-    let written = bytes.len();
+    let text_bytes = text.as_bytes().to_vec();
+    let written = text_bytes.len() + key_bytes.len() + usize::from(enter);
+    // 文本（含回车）计入命令流水，按键序列不算
     sessions
-        .input(session_id, InputSource::Ai, bytes)
+        .input_mixed(session_id, InputSource::Ai, text_bytes, key_bytes, enter)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -456,8 +461,9 @@ async fn send_key(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
         return Err("keys 不能为空".to_string());
     }
     let written = bytes.len();
+    // 纯按键不进入命令流水
     sessions
-        .input(session_id, InputSource::Ai, bytes)
+        .send_keys(session_id, InputSource::Ai, bytes)
         .await
         .map_err(|e| e.to_string())?;
     let cursor = sessions
@@ -539,14 +545,23 @@ async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
         .and_then(|v| v.as_u64())
         .unwrap_or(DEFAULT_WAIT_MAX_BYTES as u64) as usize;
 
-    // 不传 cursor 时从“现在”开始（修复：不再倾倒整个 scrollback）
+    // 不传 cursor 时默认从“现在”开始；可用 lookbackBytes 回扣一小段，
+    // 避免“命令输出已经先到、再调用 wait_for”时 pattern 匹配扑空。
     let mut cursor = match args.get("cursor").and_then(|v| v.as_u64()) {
         Some(value) => value,
-        None => sessions
-            .cursor(session_id)
-            .await
-            .map_err(|e| e.to_string())?,
+        None => {
+            let end = sessions
+                .cursor(session_id)
+                .await
+                .map_err(|e| e.to_string())?;
+            let lookback = args
+                .get("lookbackBytes")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            end.saturating_sub(lookback)
+        }
     };
+    let scanned_from = cursor;
 
     // integration 不可用时，prompt 无法判断，退化为 idle 并明确告知
     let state0 = sessions.state(session_id).await.unwrap_or_default();
@@ -590,7 +605,7 @@ async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
 
         if matched {
             return Ok(result_json(
-                &sessions, session_id, true, &kind, cursor, &acc, max_bytes, hint, &state,
+                &sessions, session_id, true, &kind, cursor, &acc, max_bytes, hint, &state, scanned_from,
             )
             .await);
         }
@@ -599,14 +614,14 @@ async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
         if kind == "idle" && saw_output && last_output_at.elapsed() >= Duration::from_millis(idle_ms)
         {
             return Ok(result_json(
-                &sessions, session_id, true, "idle", cursor, &acc, max_bytes, hint, &state,
+                &sessions, session_id, true, "idle", cursor, &acc, max_bytes, hint, &state, scanned_from,
             )
             .await);
         }
 
         if started.elapsed() > Duration::from_millis(timeout_ms) {
             return Ok(result_json(
-                &sessions, session_id, false, "timeout", cursor, &acc, max_bytes, hint, &state,
+                &sessions, session_id, false, "timeout", cursor, &acc, max_bytes, hint, &state, scanned_from,
             )
             .await);
         }
@@ -625,6 +640,7 @@ async fn result_json(
     max_bytes: usize,
     hint: Option<String>,
     state: &sshcore::manager::TerminalState,
+    scanned_from: u64,
 ) -> String {
     let bytes = acc.as_bytes();
     let truncated = bytes.len() > max_bytes;
@@ -639,6 +655,7 @@ async fn result_json(
         "matched": matched,
         "reason": kind,
         "cursor": cursor,
+        "scannedFrom": scanned_from,
         "text": text,
         "truncated": truncated,
         "atPrompt": state.at_prompt,
@@ -654,7 +671,7 @@ async fn result_json(
 async fn interrupt(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
     let session_id = arg_str(args, "sessionId")?;
     sessions
-        .input(session_id, InputSource::Terminal, b"\x03".to_vec())
+        .send_keys(session_id, InputSource::Terminal, b"\x03".to_vec())
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "sent": true }).to_string())

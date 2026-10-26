@@ -76,6 +76,9 @@ pub struct CommandRecord {
     pub exit_code: Option<i32>,
     /// 执行耗时（毫秒，仅 OSC 133 生效时可得）
     pub duration_ms: Option<u64>,
+    /// 该条是敏感输入（密码等），内容已隐去
+    #[serde(default)]
+    pub redacted: bool,
 }
 
 /// 会话的终端状态（由 OSC 133 与输出流推导）
@@ -133,6 +136,8 @@ enum Cmd {
     Input {
         source: InputSource,
         bytes: Vec<u8>,
+        /// 单独指定“要计入命令流水”的字节（None = 与 bytes 相同）
+        track: Option<Vec<u8>>,
     },
     Resize {
         cols: u32,
@@ -412,6 +417,60 @@ impl SessionManager {
             .send(Cmd::Input {
                 source,
                 bytes: data,
+                track: None,
+            })
+            .map_err(|_| Error::Other(format!("会话已结束：{id}")))
+    }
+
+    /// 只发送按键（不进入命令流水）：用于 Ctrl-C、方向键、单字符按键等
+    pub async fn send_keys(&self, id: &str, source: InputSource, data: Vec<u8>) -> Result<()> {
+        let guard = self.sessions.read().await;
+        let entry = guard
+            .get(id)
+            .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
+        entry
+            .tx
+            .send(Cmd::Input {
+                source,
+                bytes: data,
+                track: Some(Vec::new()),
+            })
+            .map_err(|_| Error::Other(format!("会话已结束：{id}")))
+    }
+
+    /// 文本 + 按键混合输入：只有文本部分（含回车）进入命令流水
+    pub async fn input_mixed(
+        &self,
+        id: &str,
+        source: InputSource,
+        text: Vec<u8>,
+        keys: Vec<u8>,
+        enter: bool,
+    ) -> Result<()> {
+        let guard = self.sessions.read().await;
+        let entry = guard
+            .get(id)
+            .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
+
+        // 跟踪的字节：文本 + 回车（按键序列不计）
+        let mut track = text.clone();
+        if enter {
+            track.push(b'\r');
+        }
+
+        // 实际写入 PTY 的字节：文本 + 按键 + 回车
+        let mut bytes = text;
+        bytes.extend_from_slice(&keys);
+        if enter {
+            bytes.push(b'\r');
+        }
+
+        entry
+            .tx
+            .send(Cmd::Input {
+                source,
+                bytes,
+                track: Some(track),
             })
             .map_err(|_| Error::Other(format!("会话已结束：{id}")))
     }
@@ -479,8 +538,61 @@ fn pop_char(buf: &mut Vec<u8>) {
 
 /// 当前行输入缓冲。会丢弃 ANSI 转义序列（终端应答、光标移动、OSC 等），
 /// 避免 `ESC[11;14R` 这类设备应答混进命令文本。
-fn mark_prompt(state: &Arc<Mutex<TerminalState>>, at_prompt: bool) {
-    if let Ok(mut guard) = state.lock() {
+/// 去掉 ANSI 转义序列，便于做文本判断
+fn strip_ansi_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\u{1b}' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if ('\u{40}'..='\u{7e}').contains(&next) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(next) = chars.next() {
+                    if next == '\u{7}' {
+                        break;
+                    }
+                    if next == '\u{1b}' {
+                        if chars.peek() == Some(&'\\') {
+                            chars.next();
+                        }
+                        break;
+                    }
+                }
+            }
+            Some(_) => {}
+            None => {}
+        }
+    }
+    out
+}
+
+/// 输出最后一行是否是密码/口令提示（用于脱敏下一条输入）
+fn looks_like_secret_prompt(tail: &str) -> bool {
+    let cleaned = strip_ansi_text(tail);
+    let last_line = cleaned.rsplit('\n').next().unwrap_or("").trim();
+    if last_line.is_empty() {
+        return false;
+    }
+    let lower = last_line.to_lowercase();
+    let asks_secret = lower.contains("password")
+        || lower.contains("passphrase")
+        || last_line.contains("密码")
+        || last_line.contains("口令");
+    let ends_with_colon = lower.ends_with(':') || last_line.ends_with('：');
+    asks_secret && ends_with_colon
+}
+
+fn mark_prompt(state: &Arc<Mutex<TerminalState>>, at_prompt: bool) {    if let Ok(mut guard) = state.lock() {
         guard.at_prompt = at_prompt;
         // 收到任何 133 标记都说明注入生效了
         guard.integration = true;
@@ -579,6 +691,10 @@ async fn run_session(
     let mut scanner = OscScanner::default();
     // (命令记录 id, 发送时刻)：等 OSC 133 的 D 标记到来后回填退出码
     let mut pending: Option<(u64, u64)> = None;
+    // 输出尾部：用于识别密码提示
+    let mut out_tail = String::new();
+    // 下一个回车要隐去的输入行（密码等）
+    let mut mask_next_line = false;
     let mut reason = "unknown";
 
     eprintln!("[run] 会话任务开始 {id}");
@@ -586,7 +702,7 @@ async fn run_session(
     loop {
         tokio::select! {
             cmd = rx.recv() => match cmd {
-                Some(Cmd::Input { source, bytes }) => {
+                Some(Cmd::Input { source, bytes, track }) => {
                     if let Err(err) = session.write(&bytes).await {
                         eprintln!("[run] 写入失败：{err}");
                         reason = "write-error";
@@ -598,19 +714,31 @@ async fn run_session(
                         guard.at_prompt = false;
                     }
 
+                    // 只把“文本 + 回车”计入命令行（按键序列不参与，避免污染历史）
+                    let tracked: &[u8] = track.as_deref().unwrap_or(&bytes);
+
                     // 按行切命令，回车即记一条（自动丢弃 ANSI 转义序列）
-                    for byte in bytes {
-                        if let Some(raw) = line.feed(byte) {
+                    for byte in tracked {
+                        if let Some(raw) = line.feed(*byte) {
                             let text = String::from_utf8_lossy(&raw).trim().to_string();
                             if !text.is_empty() {
+                                // 上一轮输出是密码/口令提示时，这一行内容不进历史
+                                let redacted = mask_next_line;
+                                mask_next_line = false;
+
                                 let record = CommandRecord {
                                     id: CMD_SEQ.fetch_add(1, Ordering::Relaxed),
                                     session_id: id.clone(),
                                     source,
-                                    command: text,
+                                    command: if redacted {
+                                        "********".to_string()
+                                    } else {
+                                        text
+                                    },
                                     sent_at: unix_millis(),
                                     exit_code: None,
                                     duration_ms: None,
+                                    redacted,
                                 };
                                 pending = Some((record.id, record.sent_at));
                                 if let Ok(mut list) = history.lock() {
@@ -651,6 +779,21 @@ async fn run_session(
 
                     // 全屏程序（tmux/vim/less）会切到 alternate screen
                     update_alt_screen(&state, &chunk);
+
+                    // 跟踪输出尾部：识别密码/口令提示，下一行输入要脱敏
+                    out_tail.push_str(&String::from_utf8_lossy(&chunk));
+                    if out_tail.len() > 512 {
+                        let cut = out_tail.len() - 512;
+                        let cut = out_tail
+                            .char_indices()
+                            .map(|(index, _)| index)
+                            .find(|&index| index >= cut)
+                            .unwrap_or(out_tail.len());
+                        out_tail.drain(..cut);
+                    }
+                    if looks_like_secret_prompt(&out_tail) {
+                        mask_next_line = true;
+                    }
 
                     // OSC 133：识别提示符状态、命令结束与退出码
                     let mut marks = Vec::new();

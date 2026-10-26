@@ -64,7 +64,7 @@ export default function CommandPanel({ sessionId }: Props) {
             <span className={`cmd-src ${item.source}`}>
               {item.source === "ai" ? "AI" : item.source === "terminal" ? "TERM" : "手动"}
             </span>
-            <code className="cmd-text">{item.command}</code>
+            <code className="cmd-text">{item.redacted ? "🔒 已隐去" : item.command}</code>
             {item.durationMs != null && (
               <span className="cmd-dur">{durationOf(item.durationMs)}</span>
             )}

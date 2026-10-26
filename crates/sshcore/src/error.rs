@@ -14,7 +14,7 @@ pub enum Error {
     #[error("主机指纹不匹配：已记录 {expected}，实际 {actual}。已拒绝连接，请核对后在下方文件中移除该主机记录")]
     HostKeyMismatch { expected: String, actual: String },
 
-    #[error("首次连接 {host}:{port}，主机指纹 {fingerprint}。确认无误后加 --accept-new 重新连接以信任该主机")]
+    #[error("首次连接 {host}:{port}，主机指纹 {fingerprint}。请在 SSH Box 界面确认并信任该指纹后重试（命令行工具可用 --accept-new）")]
     HostKeyUnknown {
         host: String,
         port: u16,
