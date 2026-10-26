@@ -185,6 +185,7 @@ fn cmd_add(
         shell_command: None,
         group: String::new(),
         tags: vec![],
+        extra: Default::default(),
     });
     store.save(&path)?;
 

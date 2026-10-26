@@ -88,6 +88,10 @@ pub struct Connection {
     pub group: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// 未知字段原样保留：避免旧版本客户端回写时丢数据（曾因此丢掉
+    /// group / shellCommand），也让新旧版本可以混跑
+    #[serde(flatten, default)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
