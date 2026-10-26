@@ -16,3 +16,4 @@ keyring = { workspace = true }
 dirs = { workspace = true }
 async-trait = { workspace = true }
 rand = { workspace = true }
+vt100 = { workspace = true }

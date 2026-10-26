@@ -15,7 +15,7 @@ pub mod pty;
 pub use config::{AppPaths, AuthKind, Connection, ConnectionStore};
 pub use error::{Error, Result};
 pub use known_hosts::KnownHosts;
-pub use manager::{ProbeInfo, SessionEvent, SessionInfo, SessionManager};
+pub use manager::{CommandRecord, InputSource, ProbeInfo, ScreenSnapshot, SessionEvent, SessionInfo, SessionManager, TerminalState};
 pub use pty::{ChannelEvent, ConnectParams, ExecOutput, PtySession, Target};
 
 /// 生成会话 ID（M1 用时间戳，接入 daemon 后改为由会话池分配）。

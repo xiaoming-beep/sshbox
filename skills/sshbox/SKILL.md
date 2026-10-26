@@ -59,9 +59,13 @@ send_key { sessionId, keys: ["Up"] }                   // 历史命令
 
 ### 全屏程序（vim / less / top / tmux）
 
-`read` 默认会剥掉 ANSI 转义序列，并返回 `altScreen` 标志。
-检测到 `altScreen: true` 说明当前在全屏程序里：此时不要指望 `prompt` 判定，
-用 `send_key` 交互，需要退出时发对应的退出键（vim 用 `Escape` + `:q!` + `Enter`）。
+用 `screen` 而不是 `read`：它返回 vt100 渲染后的**纯文本屏幕**（即用户眼前看到的画面），
+同时带 `atPrompt` / `altScreen` / 光标位置。tmux 里也适用——拿到的就是带状态栏的那一屏。
+
+`read` 的 `altScreen: true` 只说明“当前在全屏程序里”，内容仍是字节流；
+判断交互状态、读菜单/进程列表，都优先用 `screen`。
+
+需要退出时发对应的退出键：vim 用 `Escape` + `:q!` + `Enter`，tmux 用 `C-b` + `d`。
 
 ### 判断命令是否成功
 
@@ -92,6 +96,7 @@ wait_for     { sessionId, kind: "pattern", pattern: "assword" }
 | `send_input` | 写入文本，可附带结构化按键 |
 | `send_key` | 只发按键（Ctrl 组合、方向键、Escape 等） |
 | `read` | 按 cursor 增量读输出（默认已清理 ANSI） |
+| `screen` | 读**渲染后的屏幕**（vim / tmux / top 用这个） |
 | `wait_for` | 等提示符 / 等静默 / 等文本 |
 | `interrupt` | 发送 Ctrl-C |
 | `get_history` | 命令流水（来源 / 退出码 / 耗时） |

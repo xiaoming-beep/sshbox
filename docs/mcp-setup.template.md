@@ -100,6 +100,7 @@ Invoke-RestMethod $ep -Method Post -Headers $h -ContentType 'application/json' `
 | `send_input` | 往共享终端写文本，可附带结构化按键 |
 | `send_key` | 只发按键（`C-c`、`Escape`、方向键等） |
 | `read` | 按 cursor 增量读输出（默认已去 ANSI） |
+| `screen` | 读渲染后的屏幕（vim / tmux / top 用这个） |
 | `wait_for` | 等提示符 / 等静默 / 等文本 |
 | `interrupt` | 发送 Ctrl-C |
 | `get_history` | 命令流水（来源 / 退出码 / 耗时） |

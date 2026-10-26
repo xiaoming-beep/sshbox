@@ -173,6 +173,19 @@ fn tool_definitions() -> Vec<Value> {
             },
         }),
         json!({
+            "name": "screen",
+            "description": "返回终端渲染后的屏幕内容（纯文本，已去 ANSI）。适合 vim/tmux/top/less 这类全屏程序：它给你的是用户眼前看到的画面，而不是转义序列。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "maxLines": { "type": "integer", "description": "最多返回多少行（从底部算），默认 200" }
+                },
+                "required": ["sessionId"],
+                "additionalProperties": false
+            },
+        }),
+        json!({
             "name": "interrupt",
             "description": "向会话发送 Ctrl-C。等价 send_key(sessionId, [\"C-c\"])。",
             "inputSchema": {
@@ -224,6 +237,7 @@ async fn call_tool(sessions: &Arc<SessionManager>, params: &Value) -> Result<Val
         "send_key" => send_key(sessions, &args).await,
         "read" => read(sessions, &args).await,
         "wait_for" => wait_for(sessions, &args).await,
+        "screen" => screen_tool(sessions, &args).await,
         "interrupt" => interrupt(sessions, &args).await,
         "get_history" => get_history(sessions, &args).await,
         "close_session" => close_session(sessions, &args).await,
@@ -668,8 +682,36 @@ async fn result_json(
     .to_string()
 }
 
-async fn interrupt(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
+async fn screen_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
     let session_id = arg_str(args, "sessionId")?;
+    let max_lines = args
+        .get("maxLines")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(200) as usize;
+
+    let snap = sessions
+        .screen(session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let lines: Vec<&str> = snap.text.lines().collect();
+    let truncated = lines.len() > max_lines;
+    let start = lines.len().saturating_sub(max_lines);
+
+    Ok(json!({
+        "text": lines[start..].join("\n"),
+        "rows": snap.rows,
+        "cols": snap.cols,
+        "cursorRow": snap.cursor_row,
+        "cursorCol": snap.cursor_col,
+        "atPrompt": snap.at_prompt,
+        "altScreen": snap.alt_screen,
+        "truncated": truncated,
+    })
+    .to_string())
+}
+
+async fn interrupt(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {    let session_id = arg_str(args, "sessionId")?;
     sessions
         .send_keys(session_id, InputSource::Terminal, b"\x03".to_vec())
         .await

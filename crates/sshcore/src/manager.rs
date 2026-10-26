@@ -12,6 +12,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc, RwLock};
+use vt100::Parser;
 
 use crate::config::{AppPaths, Connection, ConnectionStore};
 use crate::credential;
@@ -93,6 +94,19 @@ pub struct TerminalState {
     pub alt_screen: bool,
     /// 最近一条命令的退出码
     pub last_exit: Option<i32>,
+}
+
+/// 终端渲染后的屏幕快照（给 AI 看 vim/tmux/top 这类全屏程序的真实画面）
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenSnapshot {
+    pub text: String,
+    pub rows: u16,
+    pub cols: u16,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub at_prompt: bool,
+    pub alt_screen: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -181,6 +195,8 @@ pub(crate) struct Entry {
     backlog: Arc<Mutex<Backlog>>,
     /// 终端状态（at_prompt / alt_screen / 最近退出码）
     state: Arc<Mutex<TerminalState>>,
+    /// vt100 解析器：把字节流渲染成屏幕，供 AI 阅读
+    screen: Arc<Mutex<Parser>>,
 }
 
 pub struct SessionManager {
@@ -241,9 +257,36 @@ impl SessionManager {
         Ok(entry.backlog.lock().map(|g| g.total).unwrap_or(0))
     }
 
-    /// 终端状态：是否在提示符、是否全屏、最近退出码
-    pub async fn state(&self, id: &str) -> Result<TerminalState> {
+    /// 终端渲染后的屏幕快照（纯文本）：给 AI 看 vim/tmux/top 这类全屏程序的真实画面
+    pub async fn screen(&self, id: &str) -> Result<ScreenSnapshot> {
         let guard = self.sessions.read().await;
+        let entry = guard
+            .get(id)
+            .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
+        let parser = entry
+            .screen
+            .lock()
+            .map_err(|_| Error::Other("屏幕锁失败".to_string()))?;
+        let vt_screen = parser.screen();
+        let (rows, cols) = vt_screen.size();
+        let (cursor_row, cursor_col) = vt_screen.cursor_position();
+        let raw = vt_screen.contents();
+        let text = trim_screen_text(&raw);
+
+        let state = entry.state.lock().map(|g| g.clone()).unwrap_or_default();
+        Ok(ScreenSnapshot {
+            text,
+            rows,
+            cols,
+            cursor_row,
+            cursor_col,
+            at_prompt: state.at_prompt,
+            alt_screen: state.alt_screen,
+        })
+    }
+
+    /// 终端状态：是否在提示符、是否全屏、最近退出码
+    pub async fn state(&self, id: &str) -> Result<TerminalState> {        let guard = self.sessions.read().await;
         let entry = guard
             .get(id)
             .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
@@ -346,6 +389,7 @@ impl SessionManager {
             integration: conn.shell_integration,
             ..Default::default()
         }));
+        let screen = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 0)));
         let (tx, rx) = mpsc::unbounded_channel();
 
         self.sessions.write().await.insert(
@@ -357,6 +401,7 @@ impl SessionManager {
                 last_human_input: Arc::clone(&last_human_input),
                 backlog: Arc::clone(&backlog),
                 state: Arc::clone(&state),
+                screen: Arc::clone(&screen),
             },
         );
 
@@ -369,6 +414,7 @@ impl SessionManager {
             last_human_input,
             backlog,
             state,
+            screen,
         ));
 
         // 广播给界面（以及将来的 daemon）：有新会话了
@@ -685,6 +731,7 @@ async fn run_session(
     _last_human_input: Arc<Mutex<Option<Instant>>>,
     backlog: Arc<Mutex<Backlog>>,
     state: Arc<Mutex<TerminalState>>,
+    screen: Arc<Mutex<Parser>>,
 ) {
     let events = manager.events.clone();
     let mut line = LineBuffer::default();
@@ -755,6 +802,9 @@ async fn run_session(
                 }
                 Some(Cmd::Resize { cols, rows }) => {
                     let _ = session.resize(cols, rows).await;
+                    if let Ok(mut parser) = screen.lock() {
+                        parser.set_size(rows as u16, cols as u16);
+                    }
                 }
                 Some(Cmd::Close) => {
                     reason = "user-close";
@@ -767,6 +817,9 @@ async fn run_session(
             },
             event = session.next() => match event {
                 Some(ChannelEvent::Data(chunk)) | Some(ChannelEvent::ExtendedData(chunk)) => {
+                    if let Ok(mut parser) = screen.lock() {
+                        parser.process(&chunk);
+                    }
                     let cursor = backlog
                         .lock()
                         .map(|mut b| b.push(&chunk))
@@ -856,4 +909,58 @@ async fn run_session(
         session_id: id,
         reason: reason.to_string(),
     });
+}
+
+/// 把 vt100 渲染出的整屏文本压紧：去行尾空白、去末尾空行
+fn trim_screen_text(raw: &str) -> String {
+    let lines: Vec<&str> = raw.lines().map(|line| line.trim_end()).collect();
+    let mut end = lines.len();
+    while end > 0 && lines[end - 1].is_empty() {
+        end -= 1;
+    }
+    lines[..end].join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trims_trailing_spaces_and_blank_lines() {
+        let raw = "hello   \nworld\n   \n\n";
+        assert_eq!(trim_screen_text(raw), "hello\nworld");
+    }
+
+    #[test]
+    fn vt100_renders_color_to_plain_text() {
+        let mut parser = Parser::new(3, 20, 0);
+        parser.process(b"\x1b[31mred\x1b[0m");
+        parser.process(b" ok");
+        assert_eq!(trim_screen_text(&parser.screen().contents()), "red ok");
+    }
+
+    #[test]
+    fn vt100_applies_cursor_moves() {
+        let mut parser = Parser::new(3, 20, 0);
+        // 写 abc 后光标左移两格，再写 X 覆盖 b
+        parser.process(b"abc\x1b[2D\x1b[1;31mX\x1b[0m");
+        assert_eq!(trim_screen_text(&parser.screen().contents()), "aXc");
+        assert_eq!(parser.screen().cursor_position(), (0, 2));
+    }
+
+    #[test]
+    fn vt100_clears_line_before_redraw() {
+        let mut parser = Parser::new(3, 20, 0);
+        parser.process(b"loading...\r\x1b[2Kdone");
+        assert_eq!(trim_screen_text(&parser.screen().contents()), "done");
+    }
+
+    #[test]
+    fn alt_screen_flag_follows_sequences() {
+        let state = Arc::new(Mutex::new(TerminalState::default()));
+        update_alt_screen(&state, b"\x1b[?1049h");
+        assert!(state.lock().map(|g| g.alt_screen).unwrap_or(false));
+        update_alt_screen(&state, b"\x1b[?1049l");
+        assert!(!state.lock().map(|g| g.alt_screen).unwrap_or(true));
+    }
 }
