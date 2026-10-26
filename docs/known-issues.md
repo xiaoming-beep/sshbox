@@ -7,9 +7,11 @@
 在会话里跑 tmux 后，外层 shell 被 tmux 接管，不再产生 `133;A/D` 标记，
 因此 `atPrompt` 会一直为 `false`，`wait_for(kind="prompt")` 只能超时。
 
-**当前兜底**：`altScreen: true` + 超时；AI 应改用 `send_key` 交互。
-**彻底解决**：给 tmux 配 shell integration（`tmux set -g ...`），或用 tmux 的
-`pane_current_command` 之类信号。
+**现在有绕法**：用 `screen` 工具读**渲染后的屏幕**（v0.1.2 起）。
+tmux 里拿到的是带状态栏的那一屏，AI 能直接看清当前状态，不必依赖 prompt 判定。
+
+**彻底解决**（未做）：给 tmux 配 shell integration，或引入 `pane_current_command` 类信号。
+考虑到需要在远端 shell rc 里持久化注入，侵入性较强，暫不做。
 
 ## 2. 交互式程序的退出码可能为 null
 
@@ -39,10 +41,18 @@
 MCP/REST 侧没有“信任该主机”的工具（刻意不做，避免 AI 自行 TOFU）。
 `open_session` 遇到未知主机时返回 `hostKeyUnknown`，需要人点一次界面。
 
-## 6. 没有开机自启，也没打包
+## 6. 没有打包
 
 当前只能 `cargo build -p sshbox-desktop` + 手动运行。
-托盘常驻已实现（关窗口不退出），但重启系统后需要手动启动。
+托盘常驻已实现（关窗口不退出）。
+
+开机自启 **明确不做**（用户确认不需要）。
+
+## 8. v0.1.2 的 screen 工具尚未真机验证
+
+两台测试机（172.160.0.152:8022 / 172.160.0.105:22）在开发时不可达，
+tmux / vim 场景只有单测覆盖（颜色、光标移动、清行、alt-screen），
+需要环境恢复后补一次真机回归。
 
 ## 7. 会话还原不完整
 
