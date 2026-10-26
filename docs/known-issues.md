@@ -62,13 +62,19 @@ MCP/REST 侧没有“信任该主机”的工具（刻意不做，避免 AI 自�
 
 应用重启后不会恢复上次打开的会话（凭据在，连接配置在，但会话是空的）。
 
-## 9. SFTP 写入已实现，但还缺审批 UI
+## 9. SFTP 写入已实现，还缺逐次审批
 
-写入能力（v0.3.0）：`sftp_write` / `sftp_mkdir` / `sftp_remove` / `sftp_rename`。
-安全边界是连接级白名单：`sftp.writePaths`（绝对路径前缀，空 = 禁止一切写入）
-+ `sftp.maxWriteBytes`（默认 4MB），路径带 `..` 直接拒。
+写入能力（v0.3.0/v0.3.1）：`sftp_write` / `sftp_mkdir` / `sftp_remove` /
+`sftp_rename`，以及 `sftp_download` / `sftp_upload`（本机暂存区 `Downloads/SSHBox`）。
 
-**尚未实现**：界面上的逐次审批（`requireApproval`）。
-目前靠"只有在白名单内才写得进去"来保证安全，
-自标路径需要在 `%APPDATA%\sshbox\connections.json` 里手改。
-审批弹窗 + 编辑弹窗里的路径配置是下一步。
+可写范围有两个来源，满足其一即可：
+- 界面：文件面板里对某目录点「允许写入此目录」（会话级，随时可撤）
+- 配置：`sftp.writePaths` 绝对路径前缀 + `sftp.maxWriteBytes`（默认 4MB）
+
+路径带 `..` 直接拒；上传前父目录自动创建（mkdir -p）。
+
+**尚未实现**：逐次人工审批（AI 每次写都弹窗）。
+目前靠“只在授权目录内可写”兜底；审批弹窗是下一步。
+
+其它限制：单文件 32MB 上限（未做分块续传）；
+`Downloads/SSHBox` 是 AI 唯一的本地读写区，不会碰你其它文件。

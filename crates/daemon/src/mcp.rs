@@ -313,6 +313,35 @@ fn tool_definitions() -> Vec<Value> {
                 "additionalProperties": false
             },
         }),
+        json!({
+            "name": "sftp_download",
+            "description": "把远端文件下载到本机暂存区（Downloads/SSHBox），返回本地路径。适合“先下载到本地、再推送给它机器”的离线场景。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "path": { "type": "string", "description": "远端文件路径" },
+                    "name": { "type": "string", "description": "本地文件名（不得包含路径分隔符），缺省用远端文件名" }
+                },
+                "required": ["sessionId", "path"],
+                "additionalProperties": false
+            },
+        }),
+        json!({
+            "name": "sftp_upload",
+            "description": "把暂存区（Downloads/SSHBox）里的文件推送到远端。只能读暂存区，读不到你其它本地文件；远端路径仍受可写范围限制。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string" },
+                    "name": { "type": "string", "description": "暂存区里的文件名" },
+                    "remotePath": { "type": "string", "description": "目标绝对路径（需在可写范围内）" },
+                    "overwrite": { "type": "boolean", "description": "已存在时是否覆盖，默认 false" }
+                },
+                "required": ["sessionId", "name", "remotePath"],
+                "additionalProperties": false
+            },
+        }),
     ]
 }
 
@@ -346,6 +375,8 @@ async fn call_tool(sessions: &Arc<SessionManager>, params: &Value) -> Result<Val
         "sftp_mkdir" => sftp_mkdir_tool(sessions, &args).await,
         "sftp_remove" => sftp_remove_tool(sessions, &args).await,
         "sftp_rename" => sftp_rename_tool(sessions, &args).await,
+        "sftp_download" => sftp_download_tool(sessions, &args).await,
+        "sftp_upload" => sftp_upload_tool(sessions, &args).await,
         other => Err(format!("未知工具：{other}")),
     };
 
@@ -938,6 +969,100 @@ async fn sftp_rename_tool(sessions: &Arc<SessionManager>, args: &Value) -> Resul
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "renamed": true, "from": from, "to": to }).to_string())
+}
+
+/// 本机暂存区：Downloads/SSHBox（AI 只能读写这里）
+fn staging_dir() -> std::path::PathBuf {
+    let base = std::env::var("USERPROFILE")
+        .map(std::path::PathBuf::from)
+        .ok()
+        .map(|home| home.join("Downloads"))
+        .filter(|dir| dir.is_dir())
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("SSHBox")
+}
+
+/// 只允许纯文件名，挡住 ../ 与路径分隔符
+fn staging_file(name: &str) -> Result<std::path::PathBuf, String> {
+    let name = name.trim();
+    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("文件名不能包含路径分隔符或 ..".to_string());
+    }
+    let dir = staging_dir();
+    std::fs::create_dir_all(&dir).map_err(|err| format!("创建暂存目录失败：{err}"))?;
+    Ok(dir.join(name))
+}
+
+async fn sftp_download_tool(
+    sessions: &Arc<SessionManager>,
+    args: &Value,
+) -> Result<String, String> {
+    let session_id = arg_str(args, "sessionId")?;
+    let path = arg_str(args, "path")?;
+    let name = args
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| path.rsplit('/').next().unwrap_or("download").to_string());
+
+    let local = staging_file(&name)?;
+    const MAX_BYTES: usize = 64 * 1024 * 1024;
+
+    let data = sessions
+        .sftp_read(session_id, path, MAX_BYTES)
+        .await
+        .map_err(|e| e.to_string())?;
+    let bytes = data.len();
+
+    std::fs::write(&local, &data).map_err(|err| format!("写入本地暂存失败：{err}"))?;
+
+    Ok(json!({
+        "localPath": local.display().to_string(),
+        "bytes": bytes,
+        "remotePath": path,
+    })
+    .to_string())
+}
+
+async fn sftp_upload_tool(
+    sessions: &Arc<SessionManager>,
+    args: &Value,
+) -> Result<String, String> {
+    let session_id = arg_str(args, "sessionId")?;
+    let name = arg_str(args, "name")?;
+    let remote_path = arg_str(args, "remotePath")?;
+    let overwrite = args
+        .get("overwrite")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+
+    let local = staging_file(name)?;
+    let data = std::fs::read(&local)
+        .map_err(|err| format!("读取暂存文件失败（{name}）：{err}"))?;
+    let bytes = data.len();
+
+    if !overwrite
+        && sessions
+            .sftp_exists(session_id, remote_path)
+            .await
+            .map_err(|e| e.to_string())?
+    {
+        return Err(format!(
+            "{remote_path} 已存在；确认覆盖请传 overwrite=true"
+        ));
+    }
+
+    sessions
+        .sftp_write(session_id, remote_path, data)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "uploaded": true,
+        "bytes": bytes,
+        "remotePath": remote_path,
+    })
+    .to_string())
 }
 
 async fn close_session(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {

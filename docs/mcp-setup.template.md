@@ -111,6 +111,8 @@ Invoke-RestMethod $ep -Method Post -Headers $h -ContentType 'application/json' `
 | `sftp_mkdir` | 建远端目录 |
 | `sftp_remove` | 删除远端文件或空目录 |
 | `sftp_rename` | 重命名/移动 |
+| `sftp_download` | 下载到本机暂存区 `Downloads/SSHBox` |
+| `sftp_upload` | 暂存区文件推送到远端 |
 | `close_session` | 关闭会话 |
 
 ### 等待命令结束的正确姿势

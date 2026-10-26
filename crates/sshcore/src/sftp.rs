@@ -153,6 +153,17 @@ pub async fn exists(handle: &ConnectionHandle, path: &str) -> bool {
 pub async fn write_file(handle: &ConnectionHandle, path: &str, data: &[u8]) -> Result<()> {
     let path = normalize(path)?;
     let sftp = connect(handle).await?;
+
+    // 父目录不存在时自动创建：推送文件不该要求调用方先 mkdir
+    if let Some((parent, _)) = path.rsplit_once('/') {
+        let mut current = String::new();
+        for segment in parent.split('/').filter(|segment| !segment.is_empty()) {
+            current.push('/');
+            current.push_str(segment);
+            let _ = sftp.create_dir(&current).await;
+        }
+    }
+
     let mut file = sftp
         .create(path)
         .await
