@@ -121,6 +121,14 @@ export const api = {
   sftpList: (id: string, path: string) => invoke<SftpEntry[]>("sftp_list", { id, path }),
   sftpStat: (id: string, path: string) => invoke<SftpEntry>("sftp_stat", { id, path }),
   sftpDownload: (id: string, path: string) => invoke<string>("sftp_download", { id, path }),
+  setWriteRoot: (id: string, path: string | null) =>
+    invoke<string | null>("set_write_root", { id, path }),
+  sftpWrite: (id: string, path: string, base64: string, overwrite = false) =>
+    invoke<void>("sftp_write", { id, path, base64, overwrite }),
+  sftpMkdir: (id: string, path: string) => invoke<void>("sftp_mkdir", { id, path }),
+  sftpRemove: (id: string, path: string) => invoke<void>("sftp_remove", { id, path }),
+  sftpRename: (id: string, from: string, to: string) =>
+    invoke<void>("sftp_rename", { id, from, to }),
   debugLog: (message: string) => invoke<void>("debug_log", { message }),
 };
 

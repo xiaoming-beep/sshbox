@@ -673,3 +673,51 @@ select:focus {
   font-size: 11px;
   word-break: break-all;
 }
+
+.fb-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fb-tools .btn-ghost {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+
+.fb-tools .btn-ghost.active {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.fb-tools .btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fb-overwrite {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.fb-overwrite input {
+  margin: 0;
+}
+
+.fb-scope {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--ok);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

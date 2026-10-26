@@ -199,6 +199,8 @@ pub(crate) struct Entry {
     screen: Arc<Mutex<Parser>>,
     /// 共享的 SSH 连接句柄（SFTP 等子系统用，不额外开 TCP）
     handle: crate::pty::ConnectionHandle,
+    /// 人工在界面上授予以写权限的目录（会话级，随时可撤）
+    write_root: Arc<Mutex<Option<String>>>,
 }
 
 pub struct SessionManager {
@@ -345,9 +347,41 @@ impl SessionManager {
         Ok(store.get(&connection_id)?.clone())
     }
 
-    /// 写入前校验：绝对路径、禁止 `..`、必须在可写前缀内、不超大小上限
+    /// 人工在界面上授予以写权限的目录（传 None 撤销）
+    pub async fn set_write_root(&self, id: &str, path: Option<String>) -> Result<Option<String>> {
+        let guard = self.sessions.read().await;
+        let entry = guard
+            .get(id)
+            .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
+        let mut slot = entry
+            .write_root
+            .lock()
+            .map_err(|_| Error::Other("写权限锁失败".to_string()))?;
+
+        *slot = path
+            .map(|value| value.trim().trim_end_matches('/').to_string())
+            .filter(|value| !value.is_empty());
+        Ok(slot.clone())
+    }
+
+    /// 当前会话的可写目录（未授权时为 None）
+    pub async fn write_root(&self, id: &str) -> Result<Option<String>> {
+        let guard = self.sessions.read().await;
+        let entry = guard
+            .get(id)
+            .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
+        let value = entry
+            .write_root
+            .lock()
+            .map(|slot| slot.clone())
+            .unwrap_or_default();
+        Ok(value)
+    }
+
+    /// 写入前校验：绝对路径、禁止 `..`、必须在配置白名单或界面授权的目录内、不超上限
     fn ensure_writable(
         policy: &crate::config::SftpPolicy,
+        granted: Option<&str>,
         path: &str,
         size: u64,
     ) -> Result<()> {
@@ -358,14 +392,23 @@ impl SessionManager {
         if path.contains('\0') || path.split('/').any(|segment| segment == "..") {
             return Err(Error::Other("写入路径不能包含 .. 或非法字符".to_string()));
         }
-        if !policy.allows(path) {
-            let scope = if policy.write_paths.is_empty() {
-                "（该连接未配置可写路径，写入一律拒绝）".to_string()
-            } else {
-                format!("（允许写入：{}）", policy.write_paths.join(", "))
+
+        let by_policy = policy.allows(path);
+        let by_grant = granted
+            .map(|root| path == root || path.starts_with(&format!("{}/", root.trim_end_matches('/'))))
+            .unwrap_or(false);
+
+        if !by_policy && !by_grant {
+            let scope = match granted {
+                Some(root) => format!("（当前仅在界面授权的目录 {root} 内可写）"),
+                None if policy.write_paths.is_empty() => {
+                    "（未授予写权限：在文件面板里对该目录点“允许写入”即可）".to_string()
+                }
+                None => format!("（允许写入：{}）", policy.write_paths.join(", ")),
             };
             return Err(Error::Other(format!("路径 {path} 不在可写范围内{scope}")));
         }
+
         if size > policy.max_write_bytes {
             return Err(Error::Other(format!(
                 "内容 {size} 字节，超过单次写入上限 {}",
@@ -375,36 +418,40 @@ impl SessionManager {
         Ok(())
     }
 
-    /// 写远端文件（覆盖），受连接级策略限制
-    pub async fn sftp_write(&self, id: &str, path: &str, data: Vec<u8>) -> Result<()> {
+    /// 取（连接策略 + 当前会话授权目录）
+    async fn write_scope(&self, id: &str) -> Result<(crate::config::SftpPolicy, Option<String>)> {
         let conn = self.connection_of(id).await?;
         let policy = conn.sftp.clone().unwrap_or_default();
-        Self::ensure_writable(&policy, path, data.len() as u64)?;
+        let granted = self.write_root(id).await?;
+        Ok((policy, granted))
+    }
+
+    /// 写远端文件（覆盖），受连接策略或界面授权限制
+    pub async fn sftp_write(&self, id: &str, path: &str, data: Vec<u8>) -> Result<()> {
+        let (policy, granted) = self.write_scope(id).await?;
+        Self::ensure_writable(&policy, granted.as_deref(), path, data.len() as u64)?;
         let handle = self.connection_handle(id).await?;
         crate::sftp::write_file(&handle, path, &data).await
     }
 
     pub async fn sftp_mkdir(&self, id: &str, path: &str) -> Result<()> {
-        let conn = self.connection_of(id).await?;
-        let policy = conn.sftp.clone().unwrap_or_default();
-        Self::ensure_writable(&policy, path, 0)?;
+        let (policy, granted) = self.write_scope(id).await?;
+        Self::ensure_writable(&policy, granted.as_deref(), path, 0)?;
         let handle = self.connection_handle(id).await?;
-        crate::sftp::mkdir(&handle, path).await
+        crate::sftp::mkdir_p(&handle, path).await
     }
 
     pub async fn sftp_remove(&self, id: &str, path: &str) -> Result<()> {
-        let conn = self.connection_of(id).await?;
-        let policy = conn.sftp.clone().unwrap_or_default();
-        Self::ensure_writable(&policy, path, 0)?;
+        let (policy, granted) = self.write_scope(id).await?;
+        Self::ensure_writable(&policy, granted.as_deref(), path, 0)?;
         let handle = self.connection_handle(id).await?;
         crate::sftp::remove(&handle, path).await
     }
 
     pub async fn sftp_rename(&self, id: &str, from: &str, to: &str) -> Result<()> {
-        let conn = self.connection_of(id).await?;
-        let policy = conn.sftp.clone().unwrap_or_default();
-        Self::ensure_writable(&policy, from, 0)?;
-        Self::ensure_writable(&policy, to, 0)?;
+        let (policy, granted) = self.write_scope(id).await?;
+        Self::ensure_writable(&policy, granted.as_deref(), from, 0)?;
+        Self::ensure_writable(&policy, granted.as_deref(), to, 0)?;
         let handle = self.connection_handle(id).await?;
         crate::sftp::rename(&handle, from, to).await
     }
@@ -503,6 +550,7 @@ impl SessionManager {
         }));
         let screen = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 0)));
         let connection = session.handle();
+        let write_root: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let (tx, rx) = mpsc::unbounded_channel();
 
         self.sessions.write().await.insert(
@@ -516,6 +564,7 @@ impl SessionManager {
                 state: Arc::clone(&state),
                 screen: Arc::clone(&screen),
                 handle: connection,
+                write_root: Arc::clone(&write_root),
             },
         );
 
@@ -1076,5 +1125,45 @@ mod tests {
         assert!(state.lock().map(|g| g.alt_screen).unwrap_or(false));
         update_alt_screen(&state, b"\x1b[?1049l");
         assert!(!state.lock().map(|g| g.alt_screen).unwrap_or(true));
+    }
+
+    // ---------------------------------------------------------- 写入范围校验
+
+    fn policy_with(paths: &[&str]) -> crate::config::SftpPolicy {
+        crate::config::SftpPolicy {
+            write_paths: paths.iter().map(|p| p.to_string()).collect(),
+            max_write_bytes: 1024,
+        }
+    }
+
+    #[test]
+    fn write_denied_when_nothing_granted() {
+        let policy = policy_with(&[]);
+        let result = SessionManager::ensure_writable(&policy, None, "/tmp/a.txt", 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn granted_directory_allows_only_its_subtree() {
+        let policy = policy_with(&[]);
+        assert!(SessionManager::ensure_writable(&policy, Some("/tmp/sbtest"), "/tmp/sbtest/a.txt", 1).is_ok());
+        // 前缀边界：/tmp/sbtestfoo 不能算 /tmp/sbtest
+        assert!(SessionManager::ensure_writable(&policy, Some("/tmp/sbtest"), "/tmp/sbtestfoo/a.txt", 1).is_err());
+        // 其他目录不能写
+        assert!(SessionManager::ensure_writable(&policy, Some("/tmp/sbtest"), "/etc/passwd", 1).is_err());
+    }
+
+    #[test]
+    fn relative_or_dotdot_paths_are_rejected() {
+        let policy = policy_with(&["/tmp"]);
+        assert!(SessionManager::ensure_writable(&policy, None, "tmp/a.txt", 1).is_err());
+        assert!(SessionManager::ensure_writable(&policy, None, "/tmp/../etc/passwd", 1).is_err());
+    }
+
+    #[test]
+    fn size_limit_is_enforced() {
+        let policy = policy_with(&["/tmp"]);
+        assert!(SessionManager::ensure_writable(&policy, None, "/tmp/a", 1024).is_ok());
+        assert!(SessionManager::ensure_writable(&policy, None, "/tmp/a", 1025).is_err());
     }
 }

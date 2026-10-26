@@ -172,6 +172,23 @@ pub async fn mkdir(handle: &ConnectionHandle, path: &str) -> Result<()> {
         .map_err(|err| Error::Other(format!("创建目录失败（{path}）：{err}")))
 }
 
+/// 递归创建目录：已存在的层级直接跳过（mkdir -p）
+pub async fn mkdir_p(handle: &ConnectionHandle, path: &str) -> Result<()> {
+    let path = normalize(path)?;
+    if !path.starts_with('/') {
+        return Err(Error::Other("目录路径必须是绝对路径".to_string()));
+    }
+    let sftp = connect(handle).await?;
+    let mut current = String::new();
+    for segment in path.split('/').filter(|segment| !segment.is_empty()) {
+        current.push('/');
+        current.push_str(segment);
+        // 已存在会报错，忽略；最终写入时会暴露真正的权限问题
+        let _ = sftp.create_dir(&current).await;
+    }
+    Ok(())
+}
+
 /// 删除：先按文件删，失败再按空目录删
 pub async fn remove(handle: &ConnectionHandle, path: &str) -> Result<()> {
     let path = normalize(path)?;

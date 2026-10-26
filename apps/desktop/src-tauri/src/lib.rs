@@ -280,6 +280,63 @@ async fn sftp_download(
     Ok(target.display().to_string())
 }
 
+/// 界面授权/撤销某个目录的可写权限
+#[tauri::command]
+async fn set_write_root(
+    state: State<'_, AppState>,
+    id: String,
+    path: Option<String>,
+) -> CmdResult<Option<String>> {
+    Ok(state.sessions.set_write_root(&id, path).await?)
+}
+
+#[tauri::command]
+async fn sftp_write(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    base64: String,
+    overwrite: Option<bool>,
+) -> CmdResult<()> {
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(base64)
+        .map_err(|err| CmdError::Message {
+            message: format!("base64 解码失败：{err}"),
+        })?;
+
+    if !overwrite.unwrap_or(false) && state.sessions.sftp_exists(&id, &path).await? {
+        return Err(CmdError::Message {
+            message: format!("{path} 已存在，勾选“覆盖”后再上传"),
+        });
+    }
+
+    state.sessions.sftp_write(&id, &path, data).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn sftp_mkdir(state: State<'_, AppState>, id: String, path: String) -> CmdResult<()> {
+    state.sessions.sftp_mkdir(&id, &path).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn sftp_remove(state: State<'_, AppState>, id: String, path: String) -> CmdResult<()> {
+    state.sessions.sftp_remove(&id, &path).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn sftp_rename(
+    state: State<'_, AppState>,
+    id: String,
+    from: String,
+    to: String,
+) -> CmdResult<()> {
+    state.sessions.sftp_rename(&id, &from, &to).await?;
+    Ok(())
+}
+
 fn download_dir() -> std::path::PathBuf {
     if let Ok(profile) = std::env::var("USERPROFILE") {
         let downloads = std::path::Path::new(&profile).join("Downloads");
@@ -537,6 +594,11 @@ pub fn run() {
             sftp_list,
             sftp_stat,
             sftp_download,
+            set_write_root,
+            sftp_write,
+            sftp_mkdir,
+            sftp_remove,
+            sftp_rename,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 启动失败");
