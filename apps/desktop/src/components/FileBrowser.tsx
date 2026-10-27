@@ -56,6 +56,8 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [editingPath, setEditingPath] = useState(false);
+  const [draft, setDraft] = useState("");
 
   const fileInput = useRef<HTMLInputElement | null>(null);
   const dirInput = useRef<HTMLInputElement | null>(null);
@@ -193,9 +195,36 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
         </div>
       </div>
 
-      <div className="fb-path" title={path}>
-        {path}
-      </div>
+      {editingPath ? (
+        <input
+          className="fb-path-input"
+          value={draft}
+          autoFocus
+          spellCheck={false}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              const target = draft.trim();
+              setEditingPath(false);
+              if (target) void load(target);
+            } else if (event.key === "Escape") {
+              setEditingPath(false);
+            }
+          }}
+          onBlur={() => setEditingPath(false)}
+        />
+      ) : (
+        <div
+          className="fb-path"
+          title="点击可以直接编辑路径"
+          onClick={() => {
+            setDraft(path);
+            setEditingPath(true);
+          }}
+        >
+          {path}
+        </div>
+      )}
 
       <div className="fb-tools">
         <button

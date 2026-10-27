@@ -69,8 +69,14 @@ pub async fn list_dir(handle: &ConnectionHandle, path: &str) -> Result<Vec<SftpE
     let path = normalize(path)?;
     let sftp = connect(handle).await?;
 
+    // 规范化成绝对路径，这样路径栏可读、引交也不会歧义
+    let base = sftp
+        .canonicalize(path.to_string())
+        .await
+        .unwrap_or_else(|_| path.to_string());
+
     let mut reader = sftp
-        .read_dir(path)
+        .read_dir(base.as_str())
         .await
         .map_err(|err| Error::Other(format!("列目录失败（{path}）：{err}")))?;
 
@@ -80,7 +86,7 @@ pub async fn list_dir(handle: &ConnectionHandle, path: &str) -> Result<Vec<SftpE
         if name == "." || name == ".." {
             continue;
         }
-        let full = join_path(path, &name);
+        let full = join_path(&base, &name);
         entries.push(to_entry(&full, &name, &entry.metadata()));
     }
 

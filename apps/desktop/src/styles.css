@@ -604,6 +604,24 @@ select:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: text;
+}
+
+.fb-path:hover {
+  background: var(--panel-2);
+}
+
+.fb-path-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  padding: 6px 10px;
+  background: #10131a;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: var(--accent);
+  outline: none;
 }
 
 .fb-list {
