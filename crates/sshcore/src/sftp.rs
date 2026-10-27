@@ -23,6 +23,14 @@ pub struct SftpEntry {
     pub modified: Option<u32>,
 }
 
+/// 一次目录列举的结果（带规范化后的绝对路径，供面包屑使用）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Listing {
+    pub dir: String,
+    pub entries: Vec<SftpEntry>,
+}
+
 fn normalize(path: &str) -> Result<&str> {
     let trimmed = path.trim();
     if trimmed.contains('\0') {
@@ -65,11 +73,11 @@ async fn connect(handle: &ConnectionHandle) -> Result<russh_sftp::client::SftpSe
         .map_err(|err| Error::Other(format!("SFTP 初始化失败：{err}")))
 }
 
-pub async fn list_dir(handle: &ConnectionHandle, path: &str) -> Result<Vec<SftpEntry>> {
+pub async fn list_dir(handle: &ConnectionHandle, path: &str) -> Result<Listing> {
     let path = normalize(path)?;
     let sftp = connect(handle).await?;
 
-    // 规范化成绝对路径，这样路径栏可读、引交也不会歧义
+    // 规范化成绝对路径，这样面包屑可读、引交也不会歧义
     let base = sftp
         .canonicalize(path.to_string())
         .await
@@ -92,7 +100,7 @@ pub async fn list_dir(handle: &ConnectionHandle, path: &str) -> Result<Vec<SftpE
 
     // 目录在前，其余按名字排序
     entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
-    Ok(entries)
+    Ok(Listing { dir: base, entries })
 }
 
 pub async fn stat(handle: &ConnectionHandle, path: &str) -> Result<SftpEntry> {

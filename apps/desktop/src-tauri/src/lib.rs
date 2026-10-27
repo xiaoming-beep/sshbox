@@ -238,7 +238,7 @@ async fn sftp_list(
     state: State<'_, AppState>,
     id: String,
     path: String,
-) -> CmdResult<Vec<sshcore::sftp::SftpEntry>> {
+) -> CmdResult<sshcore::sftp::Listing> {
     Ok(state.sessions.sftp_list(&id, &path).await?)
 }
 

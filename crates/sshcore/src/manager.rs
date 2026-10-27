@@ -317,7 +317,7 @@ impl SessionManager {
     }
 
     /// 列出远端目录（只读）
-    pub async fn sftp_list(&self, id: &str, path: &str) -> Result<Vec<crate::sftp::SftpEntry>> {
+    pub async fn sftp_list(&self, id: &str, path: &str) -> Result<crate::sftp::Listing> {
         let handle = self.connection_handle(id).await?;
         crate::sftp::list_dir(&handle, path).await
     }

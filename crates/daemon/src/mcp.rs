@@ -219,7 +219,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "sftp_list",
-            "description": "列出远端目录（只读）。返回 name / path / isDir / size / mode / modified。",
+            "description": "列出远端目录（只读）。返回 { dir, entries }：dir 是规范化后的绝对路径，entries 含 name/path/isDir/size/mode/modified。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -867,11 +867,11 @@ async fn get_history(sessions: &Arc<SessionManager>, args: &Value) -> Result<Str
 async fn sftp_list_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
     let session_id = arg_str(args, "sessionId")?;
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-    let entries = sessions
+    let listing = sessions
         .sftp_list(session_id, path)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".into()))
+    Ok(json!({ "dir": listing.dir, "entries": listing.entries }).to_string())
 }
 
 async fn sftp_stat_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {

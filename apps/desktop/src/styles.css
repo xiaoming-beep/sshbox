@@ -595,33 +595,41 @@ select:focus {
   gap: 4px;
 }
 
-.fb-path {
-  padding: 6px 10px;
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: 11px;
-  color: var(--accent);
+.fb-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--border);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: text;
-}
-
-.fb-path:hover {
-  background: var(--panel-2);
-}
-
-.fb-path-input {
-  width: 100%;
-  border: 0;
-  border-bottom: 1px solid var(--accent);
-  border-radius: 0;
-  padding: 6px 10px;
-  background: #10131a;
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 11px;
+  white-space: nowrap;
+}
+
+.fb-crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.fb-crumb {
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  padding: 1px 4px;
   color: var(--accent);
-  outline: none;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.fb-crumb:hover {
+  background: var(--panel-2);
+  text-decoration: underline;
+}
+
+.fb-sep {
+  color: var(--muted);
 }
 
 .fb-list {

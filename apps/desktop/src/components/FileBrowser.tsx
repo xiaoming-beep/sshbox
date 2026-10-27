@@ -22,10 +22,9 @@ function formatTime(seconds: number | null): string {
 }
 
 function parentOf(path: string): string {
-  if (path === "/" || path === ".") return path;
+  if (path === "/" || path === ".") return "/";
   const cut = path.lastIndexOf("/");
-  if (cut < 0) return ".";
-  if (cut === 0) return "/";
+  if (cut <= 0) return "/";
   return path.slice(0, cut);
 }
 
@@ -47,8 +46,9 @@ function bytesToBase64(bytes: Uint8Array): string {
 const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
 
 export default function FileBrowser({ sessionId, onClose }: Props) {
-  const [path, setPath] = useState(".");
+  const [path, setPath] = useState("/");
   const [entries, setEntries] = useState<SftpEntry[]>([]);
+  const [history, setHistory] = useState<string[]>([]);
   const [selected, setSelected] = useState<SftpEntry | null>(null);
   const [writeRoot, setWriteRoot] = useState<string | null>(null);
   const [overwrite, setOverwrite] = useState(false);
@@ -56,24 +56,25 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [editingPath, setEditingPath] = useState(false);
-  const [draft, setDraft] = useState("");
 
   const fileInput = useRef<HTMLInputElement | null>(null);
   const dirInput = useRef<HTMLInputElement | null>(null);
 
+  /** 读目录；返回规范化后的绝对路径（失败返回 null） */
   const load = useCallback(
-    async (target: string) => {
+    async (target: string): Promise<string | null> => {
       setLoading(true);
       setError(null);
       setNotice(null);
       setSelected(null);
       try {
-        const list = await api.sftpList(sessionId, target);
-        setEntries(list);
-        setPath(target);
+        const listing = await api.sftpList(sessionId, target);
+        setEntries(listing.entries);
+        setPath(listing.dir);
+        return listing.dir;
       } catch (e) {
         setError(errorText(e));
+        return null;
       } finally {
         setLoading(false);
       }
@@ -81,8 +82,31 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
     [sessionId],
   );
 
+  /** 切换目录并记入历史（刷新用 load，不写历史） */
+  const navigate = useCallback(
+    async (target: string) => {
+      const from = path;
+      const dir = await load(target);
+      if (dir && dir !== from) {
+        setHistory((prev) => [...prev, from]);
+        setSelected(null);
+      }
+    },
+    [load, path],
+  );
+
+  const goBack = useCallback(() => {
+    setHistory((prev) => {
+      if (prev.length === 0) return prev;
+      const target = prev[prev.length - 1];
+      void load(target);
+      return prev.slice(0, -1);
+    });
+  }, [load]);
+
   useEffect(() => {
     void load(".");
+    setHistory([]);
     setWriteRoot(null);
     setOverwrite(false);
   }, [load]);
@@ -176,14 +200,26 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
     [load, overwrite, path, sessionId],
   );
 
-  const writableHere = writeRoot !== null && (path === writeRoot || path.startsWith(`${writeRoot.replace(/\/+$/, "")}/`));
+  const writableHere =
+    writeRoot !== null &&
+    (path === writeRoot || path.startsWith(`${writeRoot.replace(/\/+$/, "")}/`));
+
+  const segments = path.split("/").filter(Boolean);
 
   return (
     <aside className="file-drawer">
       <div className="fb-head">
         <span>文件</span>
         <div className="fb-actions">
-          <button className="btn-ghost" onClick={() => void load(parentOf(path))} title="上一级">
+          <button
+            className="btn-ghost"
+            onClick={goBack}
+            disabled={history.length === 0}
+            title={history.length > 0 ? `返回 ${history[history.length - 1]}` : "没有可返回的目录"}
+          >
+            ←
+          </button>
+          <button className="btn-ghost" onClick={() => void navigate(parentOf(path))} title="上一级">
             ↑
           </button>
           <button className="btn-ghost" onClick={() => void load(path)} title="刷新">
@@ -195,36 +231,22 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
         </div>
       </div>
 
-      {editingPath ? (
-        <input
-          className="fb-path-input"
-          value={draft}
-          autoFocus
-          spellCheck={false}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              const target = draft.trim();
-              setEditingPath(false);
-              if (target) void load(target);
-            } else if (event.key === "Escape") {
-              setEditingPath(false);
-            }
-          }}
-          onBlur={() => setEditingPath(false)}
-        />
-      ) : (
-        <div
-          className="fb-path"
-          title="点击可以直接编辑路径"
-          onClick={() => {
-            setDraft(path);
-            setEditingPath(true);
-          }}
-        >
-          {path}
-        </div>
-      )}
+      <div className="fb-crumbs">
+        <button className="fb-crumb" onClick={() => void navigate("/")} title="根目录">
+          /
+        </button>
+        {segments.map((segment, index) => {
+          const target = `/${segments.slice(0, index + 1).join("/")}`;
+          return (
+            <span key={target} className="fb-crumb-wrap">
+              <button className="fb-crumb" onClick={() => void navigate(target)} title={target}>
+                {segment}
+              </button>
+              {index < segments.length - 1 && <span className="fb-sep">/</span>}
+            </span>
+          );
+        })}
+      </div>
 
       <div className="fb-tools">
         <button
@@ -232,7 +254,7 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
           onClick={() => void grantHere()}
           title="把当前目录设为可写范围（可随时撤销）"
         >
-          {writeRoot === path ? "✓ 可写" : "允许写入此目录"}
+          {writeRoot === path ? "✓ 可写" : "允许写入"}
         </button>
         <button
           className="btn-ghost"
@@ -240,7 +262,7 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
           disabled={!writableHere || busy}
           title={writableHere ? "上传文件到当前目录" : "先允许写入此目录"}
         >
-          上传文件
+          传文件
         </button>
         <button
           className="btn-ghost"
@@ -248,7 +270,7 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
           disabled={!writableHere || busy}
           title={writableHere ? "上传整个文件夹（含子目录）" : "先允许写入此目录"}
         >
-          上传文件夹
+          传目录
         </button>
         <label className="fb-overwrite" title="默认不覆盖已存在的文件">
           <input
@@ -291,13 +313,13 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
             key={entry.path}
             className={`fb-row ${selected?.path === entry.path ? "selected" : ""}`}
             onClick={() => {
-              if (entry.isDir) void load(entry.path);
+              if (entry.isDir) void navigate(entry.path);
               else setSelected(entry);
             }}
             onDoubleClick={() => {
               if (!entry.isDir) void download(entry);
             }}
-            title={entry.isDir ? "双击进入" : "双击下载"}
+            title={entry.isDir ? "单击进入" : "双击下载"}
           >
             <span className="fb-icon">{entry.isDir ? "📁" : "📄"}</span>
             <span className="fb-name">{entry.name}</span>
