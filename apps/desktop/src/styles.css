@@ -334,10 +334,59 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
+  padding: 4px 10px;
   font-size: 12px;
   color: var(--muted);
   border-bottom: 1px solid var(--border);
+  min-height: 32px;
+}
+
+.cmd-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cmd-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.cmd-tab:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.cmd-tab.active {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.cmd-tab .hint {
+  margin-left: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmd-op {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.cmd-op.bad {
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .cmd-list {

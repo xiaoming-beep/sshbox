@@ -162,6 +162,8 @@ pub enum SessionEvent {
     Command(CommandRecord),
     /// 命令结束（OSC 133 的 D 标记），带上退出码与耗时
     CommandFinished(CommandRecord),
+    /// 一次文件操作（含被拒的），供界面实时展示审计
+    FileOp(FileOpRecord),
     Closed {
         session_id: String,
         reason: String,
@@ -500,11 +502,15 @@ impl SessionManager {
         let Ok(mut list) = history.lock() else {
             return;
         };
-        list.push(record);
+        list.push(record.clone());
         if list.len() > FILE_HISTORY_LIMIT {
             let drop = list.len() - FILE_HISTORY_LIMIT;
             list.drain(0..drop);
         }
+        drop(list);
+
+        // 推给界面（AI 做过的文件操作，人能实时看到）
+        let _ = self.events.send(SessionEvent::FileOp(record));
     }
 
     /// 文件操作历史（新→旧）

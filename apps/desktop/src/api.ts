@@ -38,6 +38,24 @@ export interface CommandRecord {
   redacted: boolean;
 }
 
+export type AccessSource = "human" | "ai";
+
+/** 一次文件操作审计记录（AI 与界面都会记） */
+export interface FileOpRecord {
+  id: number;
+  sessionId: string;
+  source: AccessSource;
+  /** list / stat / read / write / mkdir / remove / rename / download / upload */
+  op: string;
+  path: string;
+  bytes: number;
+  ok: boolean;
+  /** 失败原因 */
+  detail: string | null;
+  /** Unix 毫秒 */
+  at: number;
+}
+
 export interface SftpEntry {
   name: string;
   path: string;
@@ -118,6 +136,8 @@ export const api = {
   input: (id: string, data: string, source: InputSource = "human") =>
     invoke<void>("session_input", { id, data, source }),
   sessionHistory: (id: string) => invoke<CommandRecord[]>("session_history", { id }),
+  sessionFileHistory: (id: string) =>
+    invoke<FileOpRecord[]>("session_file_history", { id }),
   /** 读取自 cursor 起的输出（终端晚挂载时回放） */
   sessionRead: (id: string, cursor: number) =>
     invoke<{ data: string; cursor: number }>("session_read", { id, cursor }),

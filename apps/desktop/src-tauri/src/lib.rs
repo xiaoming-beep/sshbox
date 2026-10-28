@@ -7,7 +7,7 @@ use std::sync::Arc;
 use base64::Engine as _;
 use serde::Serialize;
 use sshcore::config::{AppPaths, Connection, ConnectionStore};
-use sshcore::manager::{AccessSource, CommandRecord, InputSource, ProbeInfo, SessionEvent, SessionInfo, SessionManager};
+use sshcore::manager::{AccessSource, CommandRecord, FileOpRecord, InputSource, ProbeInfo, SessionEvent, SessionInfo, SessionManager};
 use sshcore::{credential, Error as CoreError};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -191,6 +191,14 @@ async fn session_history(
     id: String,
 ) -> CmdResult<Vec<CommandRecord>> {
     Ok(state.sessions.history(&id).await?)
+}
+
+#[tauri::command]
+async fn session_file_history(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Vec<FileOpRecord>> {
+    Ok(state.sessions.file_history(&id).await?)
 }
 
 /// 读取自 `cursor` 起的输出，用于终端晚挂载时回放
@@ -423,6 +431,9 @@ fn forward_events(handle: AppHandle, event: SessionEvent) {    match event {
         SessionEvent::CommandFinished(record) => {
             let _ = handle.emit("ssh://command-finished", record);
         }
+        SessionEvent::FileOp(record) => {
+            let _ = handle.emit("ssh://file-op", record);
+        }
         SessionEvent::Closed { session_id, reason } => {
             let payload = serde_json::json!({ "sessionId": session_id, "reason": reason });
             let _ = handle.emit("ssh://closed", payload);
@@ -597,6 +608,7 @@ pub fn run() {
             open_session,
             session_input,
             session_history,
+            session_file_history,
             session_read,
             session_resize,
             close_session,

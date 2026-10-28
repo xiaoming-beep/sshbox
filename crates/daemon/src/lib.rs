@@ -296,6 +296,7 @@ fn event_payload(event: &SessionEvent) -> Option<(&'static str, Value)> {
         )),
         SessionEvent::Command(record) => Some(("command", json!(record))),
         SessionEvent::CommandFinished(record) => Some(("commandFinished", json!(record))),
+        SessionEvent::FileOp(record) => Some(("fileOp", json!(record))),
         SessionEvent::Closed { session_id, reason } => Some((
             "closed",
             json!({ "sessionId": session_id, "reason": reason }),
