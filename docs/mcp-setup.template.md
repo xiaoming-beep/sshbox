@@ -104,16 +104,19 @@ Invoke-RestMethod $ep -Method Post -Headers $h -ContentType 'application/json' `
 | `wait_for` | 等提示符 / 等静默 / 等文本 |
 | `interrupt` | 发送 Ctrl-C |
 | `get_history` | 命令流水（来源 / 退出码 / 耗时） |
-| `sftp_list` | 列远端目录（只读） |
-| `sftp_stat` | 查看远端文件/目录属性（只读） |
-| `sftp_read` | 读远端小文件（只读，默认 64KB 上限） |
-| `sftp_write` | 写远端文件（仅限可写前缀） |
-| `sftp_mkdir` | 建远端目录 |
-| `sftp_remove` | 删除远端文件或空目录 |
-| `sftp_rename` | 重命名/移动 |
-| `sftp_download` | 下载到本机暂存区 `Downloads/SSHBox` |
+| `get_file_history` | 文件操作审计（来源 / 路径 / 字节数 / 成败） |
+| `sftp_list` | 列远端目录（限授权范围内） |
+| `sftp_stat` | 查看远端文件/目录属性（限授权范围内） |
+| `sftp_read` | 读远端小文件（限授权范围内，默认 64KB 上限） |
+| `sftp_write` | 写远端文件（限授权范围内） |
+| `sftp_mkdir` | 建远端目录（限授权范围内） |
+| `sftp_remove` | 删除远端文件或空目录（限授权范围内） |
+| `sftp_rename` | 重命名/移动（源与目标都需在授权范围内） |
+| `sftp_download` | 下载到本机暂存区 `Downloads/SSHBox`（限授权范围内） |
 | `sftp_upload` | 暂存区文件推送到远端 |
 | `close_session` | 关闭会话 |
+
+所有工具都接受 `sessionId`，但只有一个会话时可以省略（自动选中）；多会话时必须显式指定。
 
 ### 等待命令结束的正确姿势
 

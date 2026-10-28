@@ -7,7 +7,7 @@ use std::sync::Arc;
 use base64::Engine as _;
 use serde::Serialize;
 use sshcore::config::{AppPaths, Connection, ConnectionStore};
-use sshcore::manager::{CommandRecord, InputSource, ProbeInfo, SessionEvent, SessionInfo, SessionManager};
+use sshcore::manager::{AccessSource, CommandRecord, InputSource, ProbeInfo, SessionEvent, SessionInfo, SessionManager};
 use sshcore::{credential, Error as CoreError};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -239,7 +239,7 @@ async fn sftp_list(
     id: String,
     path: String,
 ) -> CmdResult<sshcore::sftp::Listing> {
-    Ok(state.sessions.sftp_list(&id, &path).await?)
+    Ok(state.sessions.sftp_list(&id, AccessSource::Human, &path).await?)
 }
 
 #[tauri::command]
@@ -248,7 +248,7 @@ async fn sftp_stat(
     id: String,
     path: String,
 ) -> CmdResult<sshcore::sftp::SftpEntry> {
-    Ok(state.sessions.sftp_stat(&id, &path).await?)
+    Ok(state.sessions.sftp_stat(&id, AccessSource::Human, &path).await?)
 }
 
 /// 下载到本地 Downloads 目录，返回落盘路径
@@ -259,7 +259,10 @@ async fn sftp_download(
     path: String,
 ) -> CmdResult<String> {
     const MAX_BYTES: usize = 64 * 1024 * 1024;
-    let data = state.sessions.sftp_read(&id, &path, MAX_BYTES).await?;
+    let data = state
+        .sessions
+        .sftp_read(&id, AccessSource::Human, &path, MAX_BYTES)
+        .await?;
 
     let name = path
         .rsplit('/')
@@ -310,19 +313,22 @@ async fn sftp_write(
         });
     }
 
-    state.sessions.sftp_write(&id, &path, data).await?;
+    state
+        .sessions
+        .sftp_write(&id, AccessSource::Human, &path, data)
+        .await?;
     Ok(())
 }
 
 #[tauri::command]
 async fn sftp_mkdir(state: State<'_, AppState>, id: String, path: String) -> CmdResult<()> {
-    state.sessions.sftp_mkdir(&id, &path).await?;
+    state.sessions.sftp_mkdir(&id, AccessSource::Human, &path).await?;
     Ok(())
 }
 
 #[tauri::command]
 async fn sftp_remove(state: State<'_, AppState>, id: String, path: String) -> CmdResult<()> {
-    state.sessions.sftp_remove(&id, &path).await?;
+    state.sessions.sftp_remove(&id, AccessSource::Human, &path).await?;
     Ok(())
 }
 
@@ -333,7 +339,10 @@ async fn sftp_rename(
     from: String,
     to: String,
 ) -> CmdResult<()> {
-    state.sessions.sftp_rename(&id, &from, &to).await?;
+    state
+        .sessions
+        .sftp_rename(&id, AccessSource::Human, &from, &to)
+        .await?;
     Ok(())
 }
 

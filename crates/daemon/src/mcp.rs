@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
 use sshcore::config::ConnectionStore;
-use sshcore::manager::{InputSource, SessionManager};
+use sshcore::manager::{AccessSource, InputSource, SessionManager};
 
 use crate::AppState;
 
@@ -85,8 +85,8 @@ fn tool_definitions() -> Vec<Value> {
             "description": "查看会话终端状态：是否在提示符（atPrompt）、是否处于全屏程序（altScreen）、shell integration 是否生效（integration）、最近退出码（lastExit）。",
             "inputSchema": {
                 "type": "object",
-                "properties": { "sessionId": { "type": "string" } },
-                "required": ["sessionId"],
+                "properties": { "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" } },
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -110,7 +110,7 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "text": { "type": "string", "description": "普通文本；不要在 text 里塞控制字符，用 keys" },
                     "keys": {
                         "type": "array",
@@ -119,7 +119,7 @@ fn tool_definitions() -> Vec<Value> {
                     },
                     "enter": { "type": "boolean", "description": "是否在末尾补回车，默认 true（只发 keys 时默认 false）" }
                 },
-                "required": ["sessionId"],
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -129,14 +129,14 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "keys": {
                         "type": "array",
                         "items": { "type": "string" },
                         "description": "按键序列，如 [\"C-c\"]、[\"Escape\"]、[\"Up\",\"Enter\"]"
                     }
                 },
-                "required": ["sessionId", "keys"],
+                "required": ["keys"],
                 "additionalProperties": false
             },
         }),
@@ -146,12 +146,12 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "cursor": { "type": "integer", "description": "上次返回的 cursor；不传则从“现在”开始" },
                     "maxBytes": { "type": "integer", "description": "本次最多返回字节数，默认 65536" },
                     "stripAnsi": { "type": "boolean", "description": "是否剥离 ANSI 转义序列，默认 true" }
                 },
-                "required": ["sessionId"],
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -161,7 +161,7 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "kind": { "type": "string", "enum": ["prompt", "idle", "pattern"], "description": "默认 prompt，若 integration 未生效则自动退化为 idle 并在结果里说明" },
                     "pattern": { "type": "string", "description": "kind=pattern 时必须提供，按子串匹配" },
                     "cursor": { "type": "integer", "description": "可选：显式指定起始游标，默认从当前位置开始" },
@@ -170,7 +170,7 @@ fn tool_definitions() -> Vec<Value> {
                     "timeoutMs": { "type": "integer", "description": "超时毫秒，默认 20000" },
                     "maxBytes": { "type": "integer", "description": "返回文本上限，默认 8192" }
                 },
-                "required": ["sessionId"],
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -180,10 +180,10 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "maxLines": { "type": "integer", "description": "最多返回多少行（从底部算），默认 200" }
                 },
-                "required": ["sessionId"],
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -192,8 +192,8 @@ fn tool_definitions() -> Vec<Value> {
             "description": "向会话发送 Ctrl-C。等价 send_key(sessionId, [\"C-c\"])。",
             "inputSchema": {
                 "type": "object",
-                "properties": { "sessionId": { "type": "string" } },
-                "required": ["sessionId"],
+                "properties": { "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" } },
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -202,8 +202,8 @@ fn tool_definitions() -> Vec<Value> {
             "description": "读取会话的命令流水（来源、退出码、耗时）。用于了解之前执行过什么，避免重复。",
             "inputSchema": {
                 "type": "object",
-                "properties": { "sessionId": { "type": "string" } },
-                "required": ["sessionId"],
+                "properties": { "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" } },
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -212,8 +212,8 @@ fn tool_definitions() -> Vec<Value> {
             "description": "关闭会话。",
             "inputSchema": {
                 "type": "object",
-                "properties": { "sessionId": { "type": "string" } },
-                "required": ["sessionId"],
+                "properties": { "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" } },
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -223,10 +223,10 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "path": { "type": "string", "description": "目录路径；缺省为登录用户的 home（.）" }
                 },
-                "required": ["sessionId"],
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -236,10 +236,10 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "path": { "type": "string" }
                 },
-                "required": ["sessionId", "path"],
+                "required": ["path"],
                 "additionalProperties": false
             },
         }),
@@ -249,11 +249,11 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "path": { "type": "string" },
                     "maxBytes": { "type": "integer", "description": "最大读取字节数，默认 65536" }
                 },
-                "required": ["sessionId", "path"],
+                "required": ["path"],
                 "additionalProperties": false
             },
         }),
@@ -263,13 +263,13 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "path": { "type": "string", "description": "绝对路径" },
                     "text": { "type": "string", "description": "文本内容（与 base64 二选一）" },
                     "base64": { "type": "string", "description": "二进制内容的 base64（与 text 二选一）" },
                     "overwrite": { "type": "boolean", "description": "为 true 时允许覆盖已存在的文件，默认 false" }
                 },
-                "required": ["sessionId", "path"],
+                "required": ["path"],
                 "additionalProperties": false
             },
         }),
@@ -279,10 +279,10 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "path": { "type": "string" }
                 },
-                "required": ["sessionId", "path"],
+                "required": ["path"],
                 "additionalProperties": false
             },
         }),
@@ -292,10 +292,10 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "path": { "type": "string" }
                 },
-                "required": ["sessionId", "path"],
+                "required": ["path"],
                 "additionalProperties": false
             },
         }),
@@ -305,11 +305,11 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "from": { "type": "string" },
                     "to": { "type": "string" }
                 },
-                "required": ["sessionId", "from", "to"],
+                "required": ["from", "to"],
                 "additionalProperties": false
             },
         }),
@@ -319,11 +319,11 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "path": { "type": "string", "description": "远端文件路径" },
                     "name": { "type": "string", "description": "本地文件名（不得包含路径分隔符），缺省用远端文件名" }
                 },
-                "required": ["sessionId", "path"],
+                "required": ["path"],
                 "additionalProperties": false
             },
         }),
@@ -333,12 +333,24 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "sessionId": { "type": "string" },
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "name": { "type": "string", "description": "暂存区里的文件名" },
                     "remotePath": { "type": "string", "description": "目标绝对路径（需在可写范围内）" },
                     "overwrite": { "type": "boolean", "description": "已存在时是否覆盖，默认 false" }
                 },
-                "required": ["sessionId", "name", "remotePath"],
+                "required": ["name", "remotePath"],
+                "additionalProperties": false
+            },
+        }),
+        json!({
+            "name": "get_file_history",
+            "description": "读取会话的文件操作审计（list/stat/read/write/mkdir/remove/rename/download/upload），含来源、路径、字节数、是否成功。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" }
+                },
+                "required": [],
                 "additionalProperties": false
             },
         }),
@@ -377,6 +389,7 @@ async fn call_tool(sessions: &Arc<SessionManager>, params: &Value) -> Result<Val
         "sftp_rename" => sftp_rename_tool(sessions, &args).await,
         "sftp_download" => sftp_download_tool(sessions, &args).await,
         "sftp_upload" => sftp_upload_tool(sessions, &args).await,
+        "get_file_history" => get_file_history(sessions, &args).await,
         other => Err(format!("未知工具：{other}")),
     };
 
@@ -396,6 +409,41 @@ fn arg_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("缺少参数 {key}"))
+}
+
+/// 解析会话：显式传了就验一下；没传时如果只有一个会话就自动选中。
+async fn resolve_session(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
+    let explicit = args
+        .get("sessionId")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let list = sessions.list().await;
+
+    if let Some(id) = explicit {
+        if list.iter().any(|session| session.id == id) {
+            return Ok(id);
+        }
+        return Err(format!("会话 {id} 不存在或已断开"));
+    }
+
+    match list.len() {
+        0 => Err(
+            "当前没有打开的会话：请先在 SSH Box 界面连接主机，或调用 open_session".to_string(),
+        ),
+        1 => Ok(list[0].id.clone()),
+        count => {
+            let options = list
+                .iter()
+                .map(|session| format!("{}={}", session.name, session.id))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Err(format!(
+                "当前有 {count} 个会话，请显式传 sessionId：{options}"
+            ))
+        }
+    }
 }
 
 /// 把按键名映射成终端字节序列
@@ -550,13 +598,13 @@ async fn list_sessions(sessions: &Arc<SessionManager>) -> Result<String, String>
 }
 
 async fn session_state(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let state = sessions
-        .state(session_id)
+        .state(&session_id)
         .await
         .map_err(|e| e.to_string())?;
     let cursor = sessions
-        .cursor(session_id)
+        .cursor(&session_id)
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "state": state, "cursor": cursor }).to_string())
@@ -574,7 +622,7 @@ async fn open_session(sessions: &Arc<SessionManager>, args: &Value) -> Result<St
 }
 
 async fn send_input(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
     let key_bytes = keys_from(args)?;
 
@@ -593,19 +641,19 @@ async fn send_input(sessions: &Arc<SessionManager>, args: &Value) -> Result<Stri
     let written = text_bytes.len() + key_bytes.len() + usize::from(enter);
     // 文本（含回车）计入命令流水，按键序列不算
     sessions
-        .input_mixed(session_id, InputSource::Ai, text_bytes, key_bytes, enter)
+        .input_mixed(&session_id, InputSource::Ai, text_bytes, key_bytes, enter)
         .await
         .map_err(|e| e.to_string())?;
 
     let cursor = sessions
-        .cursor(session_id)
+        .cursor(&session_id)
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "written": true, "bytes": written, "cursor": cursor }).to_string())
 }
 
 async fn send_key(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let bytes = keys_from(args)?;
     if bytes.is_empty() {
         return Err("keys 不能为空".to_string());
@@ -613,18 +661,18 @@ async fn send_key(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
     let written = bytes.len();
     // 纯按键不进入命令流水
     sessions
-        .send_keys(session_id, InputSource::Ai, bytes)
+        .send_keys(&session_id, InputSource::Ai, bytes)
         .await
         .map_err(|e| e.to_string())?;
     let cursor = sessions
-        .cursor(session_id)
+        .cursor(&session_id)
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "sent": true, "bytes": written, "cursor": cursor }).to_string())
 }
 
 async fn read(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let max_bytes = args
         .get("maxBytes")
         .and_then(|v| v.as_u64())
@@ -638,13 +686,13 @@ async fn read(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, St
     let cursor = match args.get("cursor").and_then(|v| v.as_u64()) {
         Some(value) => value,
         None => sessions
-            .cursor(session_id)
+            .cursor(&session_id)
             .await
             .map_err(|e| e.to_string())?,
     };
 
     let (data, end) = sessions
-        .output_since(session_id, cursor)
+        .output_since(&session_id, cursor)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -661,7 +709,7 @@ async fn read(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, St
     };
 
     let state = sessions
-        .state(session_id)
+        .state(&session_id)
         .await
         .unwrap_or_default();
 
@@ -679,7 +727,7 @@ async fn read(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, St
 }
 
 async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let requested = args.get("kind").and_then(|v| v.as_str()).unwrap_or("prompt");
     let pattern = args.get("pattern").and_then(|v| v.as_str()).map(|s| s.to_string());
     let idle_ms = args
@@ -701,7 +749,7 @@ async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
         Some(value) => value,
         None => {
             let end = sessions
-                .cursor(session_id)
+                .cursor(&session_id)
                 .await
                 .map_err(|e| e.to_string())?;
             let lookback = args
@@ -714,7 +762,7 @@ async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
     let scanned_from = cursor;
 
     // integration 不可用时，prompt 无法判断，退化为 idle 并明确告知
-    let state0 = sessions.state(session_id).await.unwrap_or_default();
+    let state0 = sessions.state(&session_id).await.unwrap_or_default();
     let mut kind = requested.to_string();
     let mut hint: Option<String> = None;
     if kind == "prompt" && !state0.integration {
@@ -732,7 +780,7 @@ async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
 
     loop {
         let (data, next) = sessions
-            .output_since(session_id, cursor)
+            .output_since(&session_id, cursor)
             .await
             .map_err(|e| e.to_string())?;
         if !data.is_empty() {
@@ -742,7 +790,7 @@ async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
             saw_output = true;
         }
 
-        let state = sessions.state(session_id).await.unwrap_or_default();
+        let state = sessions.state(&session_id).await.unwrap_or_default();
 
         let matched = match kind.as_str() {
             "prompt" => state.integration && state.at_prompt,
@@ -755,7 +803,7 @@ async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
 
         if matched {
             return Ok(result_json(
-                &sessions, session_id, true, &kind, cursor, &acc, max_bytes, hint, &state, scanned_from,
+                &sessions, &session_id, true, &kind, cursor, &acc, max_bytes, hint, &state, scanned_from,
             )
             .await);
         }
@@ -764,14 +812,14 @@ async fn wait_for(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
         if kind == "idle" && saw_output && last_output_at.elapsed() >= Duration::from_millis(idle_ms)
         {
             return Ok(result_json(
-                &sessions, session_id, true, "idle", cursor, &acc, max_bytes, hint, &state, scanned_from,
+                &sessions, &session_id, true, "idle", cursor, &acc, max_bytes, hint, &state, scanned_from,
             )
             .await);
         }
 
         if started.elapsed() > Duration::from_millis(timeout_ms) {
             return Ok(result_json(
-                &sessions, session_id, false, "timeout", cursor, &acc, max_bytes, hint, &state, scanned_from,
+                &sessions, &session_id, false, "timeout", cursor, &acc, max_bytes, hint, &state, scanned_from,
             )
             .await);
         }
@@ -819,14 +867,14 @@ async fn result_json(
 }
 
 async fn screen_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let max_lines = args
         .get("maxLines")
         .and_then(|v| v.as_u64())
         .unwrap_or(200) as usize;
 
     let snap = sessions
-        .screen(session_id)
+        .screen(&session_id)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -847,45 +895,56 @@ async fn screen_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<Str
     .to_string())
 }
 
-async fn interrupt(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {    let session_id = arg_str(args, "sessionId")?;
+async fn get_file_history(
+    sessions: &Arc<SessionManager>,
+    args: &Value,
+) -> Result<String, String> {
+    let session_id = resolve_session(sessions, args).await?;
+    let records = sessions
+        .file_history(&session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::to_string_pretty(&records).unwrap_or_else(|_| "[]".into()))
+}
+async fn interrupt(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {    let session_id = resolve_session(sessions, args).await?;
     sessions
-        .send_keys(session_id, InputSource::Terminal, b"\x03".to_vec())
+        .send_keys(&session_id, InputSource::Terminal, b"\x03".to_vec())
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "sent": true }).to_string())
 }
 
 async fn get_history(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let records = sessions
-        .history(session_id)
+        .history(&session_id)
         .await
         .map_err(|e| e.to_string())?;
     Ok(serde_json::to_string_pretty(&records).unwrap_or_else(|_| "[]".into()))
 }
 
 async fn sftp_list_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
     let listing = sessions
-        .sftp_list(session_id, path)
+        .sftp_list(&session_id, AccessSource::Ai, path)
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "dir": listing.dir, "entries": listing.entries }).to_string())
 }
 
 async fn sftp_stat_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let path = arg_str(args, "path")?;
     let entry = sessions
-        .sftp_stat(session_id, path)
+        .sftp_stat(&session_id, AccessSource::Ai, path)
         .await
         .map_err(|e| e.to_string())?;
     Ok(serde_json::to_string_pretty(&entry).unwrap_or_default())
 }
 
 async fn sftp_read_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let path = arg_str(args, "path")?;
     let max_bytes = args
         .get("maxBytes")
@@ -893,7 +952,7 @@ async fn sftp_read_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<
         .unwrap_or(65_536) as usize;
 
     let data = sessions
-        .sftp_read(session_id, path, max_bytes)
+        .sftp_read(&session_id, AccessSource::Ai, path, max_bytes)
         .await
         .map_err(|e| e.to_string())?;
     let bytes = data.len();
@@ -910,7 +969,7 @@ async fn sftp_read_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<
 }
 
 async fn sftp_write_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let path = arg_str(args, "path")?;
     let overwrite = args
         .get("overwrite")
@@ -925,7 +984,7 @@ async fn sftp_write_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result
         (None, None) => return Err("text 与 base64 至少给一个".to_string()),
     };
 
-    if !overwrite && sessions.sftp_exists(session_id, path).await.map_err(|e| e.to_string())? {
+    if !overwrite && sessions.sftp_exists(&session_id, path).await.map_err(|e| e.to_string())? {
         return Err(format!(
             "{path} 已存在；如确认覆盖请传 overwrite=true"
         ));
@@ -933,7 +992,7 @@ async fn sftp_write_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result
 
     let bytes = data.len();
     sessions
-        .sftp_write(session_id, path, data)
+        .sftp_write(&session_id, AccessSource::Ai, path, data)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -941,31 +1000,31 @@ async fn sftp_write_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result
 }
 
 async fn sftp_mkdir_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let path = arg_str(args, "path")?;
     sessions
-        .sftp_mkdir(session_id, path)
+        .sftp_mkdir(&session_id, AccessSource::Ai, path)
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "created": true, "path": path }).to_string())
 }
 
 async fn sftp_remove_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let path = arg_str(args, "path")?;
     sessions
-        .sftp_remove(session_id, path)
+        .sftp_remove(&session_id, AccessSource::Ai, path)
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "removed": true, "path": path }).to_string())
 }
 
 async fn sftp_rename_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let from = arg_str(args, "from")?;
     let to = arg_str(args, "to")?;
     sessions
-        .sftp_rename(session_id, from, to)
+        .sftp_rename(&session_id, AccessSource::Ai, from, to)
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "renamed": true, "from": from, "to": to }).to_string())
@@ -997,7 +1056,7 @@ async fn sftp_download_tool(
     sessions: &Arc<SessionManager>,
     args: &Value,
 ) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let path = arg_str(args, "path")?;
     let name = args
         .get("name")
@@ -1009,7 +1068,7 @@ async fn sftp_download_tool(
     const MAX_BYTES: usize = 64 * 1024 * 1024;
 
     let data = sessions
-        .sftp_read(session_id, path, MAX_BYTES)
+        .sftp_read(&session_id, AccessSource::Ai, path, MAX_BYTES)
         .await
         .map_err(|e| e.to_string())?;
     let bytes = data.len();
@@ -1028,7 +1087,7 @@ async fn sftp_upload_tool(
     sessions: &Arc<SessionManager>,
     args: &Value,
 ) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     let name = arg_str(args, "name")?;
     let remote_path = arg_str(args, "remotePath")?;
     let overwrite = args
@@ -1043,7 +1102,7 @@ async fn sftp_upload_tool(
 
     if !overwrite
         && sessions
-            .sftp_exists(session_id, remote_path)
+            .sftp_exists(&session_id, remote_path)
             .await
             .map_err(|e| e.to_string())?
     {
@@ -1053,7 +1112,7 @@ async fn sftp_upload_tool(
     }
 
     sessions
-        .sftp_write(session_id, remote_path, data)
+        .sftp_write(&session_id, AccessSource::Ai, remote_path, data)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -1066,9 +1125,9 @@ async fn sftp_upload_tool(
 }
 
 async fn close_session(sessions: &Arc<SessionManager>, args: &Value) -> Result<String, String> {
-    let session_id = arg_str(args, "sessionId")?;
+    let session_id = resolve_session(sessions, args).await?;
     sessions
-        .close(session_id)
+        .close(&session_id)
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "closed": true }).to_string())
