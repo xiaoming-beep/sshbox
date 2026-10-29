@@ -26,6 +26,7 @@ export default function App() {
   const [daemon, setDaemon] = useState<DaemonInfo | null>(null);
   const [showService, setShowService] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
+  const [deleting, setDeleting] = useState<Connection | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -76,6 +77,18 @@ export default function App() {
       .then(setDaemon)
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (deleting) setDeleting(null);
+      else if (pending) setPending(null);
+      else if (showService) setShowService(false);
+      else if (editing) setEditing(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deleting, pending, showService, editing]);
 
   const connect = useCallback(async (conn: Connection) => {
     setNotice(null);
@@ -128,16 +141,22 @@ export default function App() {
 
   const removeConnection = useCallback(
     async (conn: Connection) => {
-      if (!window.confirm(`删除连接「${conn.name}」？同时会删除已保存的凭据。`)) return;
-      try {
-        await api.deleteConnection(conn.id);
-        await refresh();
-      } catch (e) {
-        setNotice(errorText(e));
-      }
+      setDeleting(conn);
     },
-    [refresh],
+    [],
   );
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleting) return;
+    const conn = deleting;
+    setDeleting(null);
+    try {
+      await api.deleteConnection(conn.id);
+      await refresh();
+    } catch (e) {
+      setNotice(errorText(e));
+    }
+  }, [deleting, refresh]);
 
   const groups = Array.from(
     new Set(
@@ -218,9 +237,19 @@ export default function App() {
       )}
 
       {pending && (
-        <div className="modal-backdrop">
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setPending(null);
+          }}
+        >
           <div className="modal">
-            <h3>确认主机指纹</h3>
+            <div className="modal-head">
+              <h3>确认主机指纹</h3>
+              <button className="modal-close" onClick={() => setPending(null)} title="关闭">
+                ✕
+              </button>
+            </div>
             <p className="hint">
               首次连接 {pending.host}:{pending.port}。请与服务器管理员核对以下指纹，
               一致后再信任；不一致说明可能存在中间人攻击。
@@ -239,9 +268,19 @@ export default function App() {
       )}
 
       {showService && (
-        <div className="modal-backdrop">
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setShowService(false);
+          }}
+        >
           <div className="modal">
-            <h3>本地服务</h3>
+            <div className="modal-head">
+              <h3>本地服务</h3>
+              <button className="modal-close" onClick={() => setShowService(false)} title="关闭">
+                ✕
+              </button>
+            </div>
             <p className="hint">
               AI 客户端通过下面的地址与本应用通信。令牌等同于密码，请不要外传。
             </p>
@@ -279,6 +318,35 @@ export default function App() {
               </button>
               <button className="btn primary" onClick={() => setShowService(false)}>
                 关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setDeleting(null);
+          }}
+        >
+          <div className="modal" style={{ width: 420 }}>
+            <div className="modal-head">
+              <h3>删除连接</h3>
+              <button className="modal-close" onClick={() => setDeleting(null)} title="关闭">
+                ✕
+              </button>
+            </div>
+            <p className="hint">
+              确定删除连接「{deleting.name}」吗？同时会删除已保存的凭据，此操作不可撤销。
+            </p>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setDeleting(null)}>
+                取消
+              </button>
+              <button className="btn danger" onClick={confirmDelete}>
+                删除
               </button>
             </div>
           </div>

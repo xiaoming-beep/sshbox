@@ -70,9 +70,19 @@ export default function ConnectionDialog({ value, isNew, groups, onCancel, onSav
   const auth = form.auth;
 
   return (
-    <div className="modal-backdrop">
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && !busy) onCancel();
+      }}
+    >
       <div className="modal">
-        <h3>{isNew ? "新建连接" : `编辑连接：${value.name}`}</h3>
+        <div className="modal-head">
+          <h3>{isNew ? "新建连接" : `编辑连接：${value.name}`}</h3>
+          <button className="modal-close" onClick={onCancel} title="关闭" disabled={busy}>
+            ✕
+          </button>
+        </div>
 
         <div className="form-row">
           <label>名称</label>

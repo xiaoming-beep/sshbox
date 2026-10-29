@@ -216,9 +216,26 @@ pub async fn open_pty_with(
     channel
         .request_pty(false, term, cols, rows, 0, 0, &[])
         .await?;
+    // `shell_command` 若是纯 shell 名（bash/zsh/sh/…），直接 `request_shell`
+    // 让服务器启动该用户的登录 shell（交互式、出提示符）；只有真正的
+    // “程序命令”（含空格/参数，如 `tmux new -A -s main`）才走 `exec`。
+    // 否则 `exec("bash")` 会以非交互方式执行 bash，读完 stdin 立即退出，
+    // 终端看起来就是“卡住”且无任何输出。
+    let is_plain_shell = shell_command
+        .map(|cmd| {
+            let t = cmd.trim();
+            !t.is_empty()
+                && !t.contains(char::is_whitespace)
+                && !t.contains('/')
+                && matches!(
+                    t,
+                    "sh" | "bash" | "zsh" | "dash" | "ash" | "fish" | "ksh" | "csh" | "tcsh"
+                )
+        })
+        .unwrap_or(false);
     match shell_command {
-        Some(command) => channel.exec(true, command.to_string()).await?,
-        None => channel.request_shell(false).await?,
+        Some(command) if !is_plain_shell => channel.exec(true, command.to_string()).await?,
+        _ => channel.request_shell(false).await?,
     }
     Ok(PtySession {
         id: crate::new_session_id(),

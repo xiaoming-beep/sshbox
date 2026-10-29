@@ -16,27 +16,30 @@ interface OutputPayload {
   data: string;
 }
 
+// 浅色终端主题：与浅灰外壳统一，白底深字。
+// xterm 用 16 色调色板渲染（bash 的彩色 ls、git 等都用这套），
+// 深色外壳下这套颜色会很刺眼，浅色下才是正确的对比度。
 const THEME = {
-  background: "#11131a",
-  foreground: "#d7dae0",
-  cursor: "#7aa2f7",
-  cursorAccent: "#11131a",
-  selectionBackground: "#2a3040",
-  black: "#1a1c24",
-  red: "#f7768e",
-  green: "#9ece6a",
-  yellow: "#e0af68",
-  blue: "#7aa2f7",
-  magenta: "#bb9af7",
-  cyan: "#7dcfff",
-  white: "#c0caf5",
-  brightBlack: "#414868",
-  brightRed: "#f7768e",
-  brightGreen: "#9ece6a",
-  brightYellow: "#e0af68",
-  brightBlue: "#7aa2f7",
-  brightMagenta: "#bb9af7",
-  brightCyan: "#7dcfff",
+  background: "#fafbfc",
+  foreground: "#1c1e22",
+  cursor: "#1c1e22",
+  cursorAccent: "#fafbfc",
+  selectionBackground: "#dbe6f2",
+  black: "#1c1e22",
+  red: "#c02c24",
+  green: "#2e7d32",
+  yellow: "#8a6d1a",
+  blue: "#3b6ea5",
+  magenta: "#7b4fa0",
+  cyan: "#1d7a7a",
+  white: "#e2e5e9",
+  brightBlack: "#6b7280",
+  brightRed: "#d6453c",
+  brightGreen: "#3d9142",
+  brightYellow: "#a0842a",
+  brightBlue: "#4a82b8",
+  brightMagenta: "#8f64b8",
+  brightCyan: "#2a9292",
   brightWhite: "#ffffff",
 };
 
