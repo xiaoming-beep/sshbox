@@ -8,6 +8,10 @@ interface Props {
 
 type Tab = "commands" | "files";
 
+/** 界面保留的条数；后端命令存 200 条、文件操作存 500 条 */
+const COMMAND_LIMIT = 200;
+const FILE_LIMIT = 500;
+
 function timeOf(ms: number): string {
   return new Date(ms).toLocaleTimeString("zh-CN", { hour12: false });
 }
@@ -39,8 +43,9 @@ export default function CommandPanel({ sessionId }: Props) {
       api.sessionHistory(sessionId).catch(() => [] as CommandRecord[]),
       api.sessionFileHistory(sessionId).catch(() => [] as FileOpRecord[]),
     ]).then(([commands, fileOps]) => {
-      setItems(commands);
-      setFiles(fileOps);
+      // 后端按时间正序返回（旧→新），界面显示新→旧，所以反转
+      setItems(commands.slice().reverse());
+      setFiles(fileOps.slice().reverse());
       if (commands.length === 0 && fileOps.length > 0) setTab("files");
     });
 
@@ -48,7 +53,8 @@ export default function CommandPanel({ sessionId }: Props) {
 
     void listen<CommandRecord>("ssh://command", (event) => {
       if (event.payload.sessionId !== sessionId) return;
-      setItems((prev) => [...prev, event.payload].slice(-200));
+      // 新的插到最前面，不用滚到底部才能看到
+      setItems((prev) => [event.payload, ...prev].slice(0, COMMAND_LIMIT));
     }).then((fn) => unlisteners.push(fn));
 
     // 命令结束时回填退出码与耗时（OSC 133）
@@ -62,7 +68,7 @@ export default function CommandPanel({ sessionId }: Props) {
     // 文件操作（含被拒的），人与 AI 的都记
     void listen<FileOpRecord>("ssh://file-op", (event) => {
       if (event.payload.sessionId !== sessionId) return;
-      setFiles((prev) => [...prev, event.payload].slice(-200));
+      setFiles((prev) => [event.payload, ...prev].slice(0, FILE_LIMIT));
     }).then((fn) => unlisteners.push(fn));
 
     return () => unlisteners.forEach((fn) => fn());
