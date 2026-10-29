@@ -27,6 +27,8 @@ const HUMAN_PRIORITY_WINDOW: Duration = Duration::from_millis(1500);
 const HISTORY_LIMIT: usize = 200;
 /// 每条会话保留多少条文件操作记录
 const FILE_HISTORY_LIMIT: usize = 500;
+/// 单独的 Escape 后面多等一会：TUI 会把它和紧跟着的字符当成组合键
+const ESCAPE_SETTLE: Duration = Duration::from_millis(120);
 
 static FILE_SEQ: AtomicU64 = AtomicU64::new(1);
 /// 输出回放缓冲上限
@@ -746,6 +748,22 @@ impl SessionManager {
     }
 
     pub async fn input(&self, id: &str, source: InputSource, data: Vec<u8>) -> Result<()> {
+        let tx = self.input_channel(id, source, data.len()).await?;
+        tx.send(Cmd::Input {
+            source,
+            bytes: data,
+            track: None,
+        })
+        .map_err(|_| Error::Other(format!("会话已结束：{id}")))
+    }
+
+    /// 取出发送通道，并按来源做“人类优先”仲裁。
+    async fn input_channel(
+        &self,
+        id: &str,
+        source: InputSource,
+        byte_len: usize,
+    ) -> Result<mpsc::UnboundedSender<Cmd>> {
         let guard = self.sessions.read().await;
         let entry = guard
             .get(id)
@@ -772,7 +790,7 @@ impl SessionManager {
                 }
             }
             InputSource::Human => {
-                eprintln!("[input] 人类输入 {} 字节", data.len());
+                eprintln!("[input] 人类输入 {byte_len} 字节");
                 if let Ok(mut slot) = entry.last_human_input.lock() {
                     *slot = Some(Instant::now());
                 }
@@ -780,67 +798,114 @@ impl SessionManager {
             InputSource::Terminal => {}
         }
 
-        entry
-            .tx
-            .send(Cmd::Input {
-                source,
-                bytes: data,
-                track: None,
-            })
-            .map_err(|_| Error::Other(format!("会话已结束：{id}")))
+        Ok(entry.tx.clone())
     }
 
     /// 只发送按键（不进入命令流水）：用于 Ctrl-C、方向键、单字符按键等
     pub async fn send_keys(&self, id: &str, source: InputSource, data: Vec<u8>) -> Result<()> {
-        let guard = self.sessions.read().await;
-        let entry = guard
-            .get(id)
-            .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
-        entry
-            .tx
-            .send(Cmd::Input {
-                source,
-                bytes: data,
-                track: Some(Vec::new()),
-            })
-            .map_err(|_| Error::Other(format!("会话已结束：{id}")))
+        let tx = self.input_channel(id, source, data.len()).await?;
+        tx.send(Cmd::Input {
+            source,
+            bytes: data,
+            track: Some(Vec::new()),
+        })
+        .map_err(|_| Error::Other(format!("会话已结束：{id}")))
     }
 
-    /// 文本 + 按键混合输入：只有文本部分（含回车）进入命令流水
+    /// 逐键发送：每个按键单独写一次，之间留 `gap`。
+    ///
+    /// 把多个按键一口气写进 PTY 时，TUI 会把连在一起的字节当成一个按键序列：
+    /// `ESC` 紧跟下一个字符会被当成 Alt 组合键，`gg` 之类也可能被合成。
+    /// 按键之间留出间隔，才能像人敲一样一次一个。
+    pub async fn send_keys_paced(
+        &self,
+        id: &str,
+        source: InputSource,
+        keys: Vec<Vec<u8>>,
+        gap: Duration,
+    ) -> Result<()> {
+        let byte_len: usize = keys.iter().map(|chunk| chunk.len()).sum();
+        let tx = self.input_channel(id, source, byte_len).await?;
+        let total = keys.len();
+
+        for (index, chunk) in keys.into_iter().enumerate() {
+            let lone_escape = chunk.as_slice() == b"\x1b";
+            tx.send(Cmd::Input {
+                source,
+                bytes: chunk,
+                track: Some(Vec::new()),
+            })
+            .map_err(|_| Error::Other(format!("会话已结束：{id}")))?;
+
+            if index + 1 < total {
+                let wait = if lone_escape { gap.max(ESCAPE_SETTLE) } else { gap };
+                if !wait.is_zero() {
+                    tokio::time::sleep(wait).await;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 文本 + 按键混合输入：只有文本部分（含回车）进入命令流水。
+    /// 按键逐个发送，中间留 `gap`（理由见 `send_keys_paced`）。
     pub async fn input_mixed(
         &self,
         id: &str,
         source: InputSource,
         text: Vec<u8>,
-        keys: Vec<u8>,
+        keys: Vec<Vec<u8>>,
         enter: bool,
+        gap: Duration,
     ) -> Result<()> {
-        let guard = self.sessions.read().await;
-        let entry = guard
-            .get(id)
-            .ok_or_else(|| Error::Other(format!("会话不存在：{id}")))?;
+        let key_len: usize = keys.iter().map(|chunk| chunk.len()).sum();
+        let tx = self
+            .input_channel(id, source, text.len() + key_len + usize::from(enter))
+            .await?;
+        let ended = || Error::Other(format!("会话已结束：{id}"));
 
-        // 跟踪的字节：文本 + 回车（按键序列不计）
-        let mut track = text.clone();
-        if enter {
-            track.push(b'\r');
-        }
-
-        // 实际写入 PTY 的字节：文本 + 按键 + 回车
-        let mut bytes = text;
-        bytes.extend_from_slice(&keys);
-        if enter {
-            bytes.push(b'\r');
-        }
-
-        entry
-            .tx
-            .send(Cmd::Input {
+        // 文本自己先写：track 与 bytes 一致，行缓冲拿到的就是这行内容
+        if !text.is_empty() {
+            tx.send(Cmd::Input {
                 source,
-                bytes,
-                track: Some(track),
+                bytes: text.clone(),
+                track: Some(text),
             })
-            .map_err(|_| Error::Other(format!("会话已结束：{id}")))
+            .map_err(|_| ended())?;
+
+            if !gap.is_zero() {
+                tokio::time::sleep(gap).await;
+            }
+        }
+
+        let total = keys.len();
+        for (index, chunk) in keys.into_iter().enumerate() {
+            let lone_escape = chunk.as_slice() == b"\x1b";
+            tx.send(Cmd::Input {
+                source,
+                bytes: chunk,
+                track: Some(Vec::new()),
+            })
+            .map_err(|_| ended())?;
+
+            if index + 1 < total || enter {
+                let wait = if lone_escape { gap.max(ESCAPE_SETTLE) } else { gap };
+                if !wait.is_zero() {
+                    tokio::time::sleep(wait).await;
+                }
+            }
+        }
+
+        // 回车单独发：行缓冲收到它才把这一行记进命令流水
+        if enter {
+            tx.send(Cmd::Input {
+                source,
+                bytes: b"\r".to_vec(),
+                track: Some(b"\r".to_vec()),
+            })
+            .map_err(|_| ended())?;
+        }
+        Ok(())
     }
 
     pub async fn resize(&self, id: &str, cols: u32, rows: u32) -> Result<()> {

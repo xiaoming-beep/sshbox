@@ -28,6 +28,8 @@ const DEFAULT_IDLE_MS: u64 = 1200;
 const DEFAULT_MAX_BYTES: usize = 65536;
 /// `wait_for` 返回文本的默认上限（避免倾倒整个 scrollback）
 const DEFAULT_WAIT_MAX_BYTES: usize = 8192;
+/// 结构化按键之间的默认间隔（毫秒）
+const DEFAULT_KEY_GAP_MS: u64 = 30;
 
 pub async fn handle(State(app): State<AppState>, Json(request): Json<Value>) -> Response {
     let id = request.get("id").cloned().filter(|v| !v.is_null());
@@ -115,9 +117,10 @@ fn tool_definitions() -> Vec<Value> {
                     "keys": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "结构化按键，按顺序发送。支持 C-a..C-z、Escape、Enter、Tab、Backspace、Up/Down/Left/Right、Home/End、PageUp/PageDown、Delete、Space"
+                        "description": "结构化按键，按顺序逐键发送（默认间隔 30ms）。支持 C-a..C-z、Escape、Enter、Tab、Backspace、Up/Down/Left/Right、Home/End、PageUp/PageDown、Delete、Space；单个字符按键保留大小写（\"G\" 就是大写 G）"
                     },
-                    "enter": { "type": "boolean", "description": "是否在末尾补回车，默认 true（只发 keys 时默认 false）" }
+                    "enter": { "type": "boolean", "description": "是否在末尾补回车，默认 true（只发 keys 时默认 false）" },
+                    "intervalMs": { "type": "integer", "description": "按键之间的间隔（毫秒），默认 30，传 0 不等待；单独 Escape 后至少等 120ms" }
                 },
                 "required": [],
                 "additionalProperties": false
@@ -125,7 +128,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "send_key",
-            "description": "只发送结构化按键，例如 vim 里退出：[\"Escape\", \"C-c\"] 或 [\":\", \"q\", \"Enter\"]（配合 send_input）。",
+            "description": "只发送结构化按键，逐键发送（默认间隔 30ms）。例如 vim 里新开一行：[\"Escape\", \"G\", \"o\"]；退出：[\"Escape\", \":\", \"w\", \"q\", \"Enter\"]。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -133,8 +136,9 @@ fn tool_definitions() -> Vec<Value> {
                     "keys": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "按键序列，如 [\"C-c\"]、[\"Escape\"]、[\"Up\",\"Enter\"]"
-                    }
+                        "description": "按键序列，如 [\"C-c\"]、[\"Escape\"]、[\"Up\",\"Enter\"]；单个字符保留大小写"
+                    },
+                    "intervalMs": { "type": "integer", "description": "按键之间的间隔（毫秒），默认 30，传 0 不等待" }
                 },
                 "required": ["keys"],
                 "additionalProperties": false
@@ -490,8 +494,10 @@ fn key_bytes(name: &str) -> Option<Vec<u8>> {
             }
         }
     }
-    // 单字符字面量（如 "d"、":"）直接原样发送，方便 tmux 前缀键这类序列
-    let mut chars = lower.chars();
+    // 单字符字面量（如 "d"、"G"、":"）直接原样发送，**保留大小写**：
+    // vim 的 G / O / A / I 都区分大小写，之前统一转小写导致 "G" 变成 "g"、
+    // "Escape G o" 被 vim 当成 "go"（跳到第 1 字节），后续文本就错位了。
+    let mut chars = name.trim().chars();
     if let (Some(ch), None) = (chars.next(), chars.next()) {
         if !ch.is_control() {
             let mut buf = [0u8; 4];
@@ -501,19 +507,33 @@ fn key_bytes(name: &str) -> Option<Vec<u8>> {
     None
 }
 
-fn keys_from(args: &Value) -> Result<Vec<u8>, String> {
+/// 把 keys 数组拆成“一个按键一份字节”，交给发送层逐键发
+fn keys_from(args: &Value) -> Result<Vec<Vec<u8>>, String> {
     let Some(list) = args.get("keys").and_then(|v| v.as_array()) else {
         return Ok(Vec::new());
     };
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(list.len());
     for item in list {
         let name = item.as_str().unwrap_or_default();
         match key_bytes(name) {
-            Some(bytes) => out.extend_from_slice(&bytes),
+            Some(bytes) => out.push(bytes),
             None => return Err(format!("无法识别的按键：{name}")),
         }
     }
     Ok(out)
+}
+
+fn keys_len(keys: &[Vec<u8>]) -> usize {
+    keys.iter().map(|chunk| chunk.len()).sum()
+}
+
+/// 按键之间的间隔（毫秒），默认 40ms；传 0 表示不等待
+fn key_gap_from(args: &Value) -> Duration {
+    let ms = args
+        .get("intervalMs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(DEFAULT_KEY_GAP_MS);
+    Duration::from_millis(ms.min(5000))
 }
 
 /// 剥离 ANSI 转义序列与 \r，便于 AI 阅读
@@ -638,10 +658,17 @@ async fn send_input(sessions: &Arc<SessionManager>, args: &Value) -> Result<Stri
     }
 
     let text_bytes = text.as_bytes().to_vec();
-    let written = text_bytes.len() + key_bytes.len() + usize::from(enter);
-    // 文本（含回车）计入命令流水，按键序列不算
+    let written = text_bytes.len() + keys_len(&key_bytes) + usize::from(enter);
+    // 文本（含回车）计入命令流水，按键序列不算；按键逐个发，中间留间隔
     sessions
-        .input_mixed(&session_id, InputSource::Ai, text_bytes, key_bytes, enter)
+        .input_mixed(
+            &session_id,
+            InputSource::Ai,
+            text_bytes,
+            key_bytes,
+            enter,
+            key_gap_from(args),
+        )
         .await
         .map_err(|e| e.to_string())?;
 
@@ -658,10 +685,10 @@ async fn send_key(sessions: &Arc<SessionManager>, args: &Value) -> Result<String
     if bytes.is_empty() {
         return Err("keys 不能为空".to_string());
     }
-    let written = bytes.len();
-    // 纯按键不进入命令流水
+    let written = keys_len(&bytes);
+    // 纯按键不进入命令流水；逐键发送，避免 ESC 与后续字符粘成组合键
     sessions
-        .send_keys(&session_id, InputSource::Ai, bytes)
+        .send_keys_paced(&session_id, InputSource::Ai, bytes, key_gap_from(args))
         .await
         .map_err(|e| e.to_string())?;
     let cursor = sessions
@@ -1131,4 +1158,68 @@ async fn close_session(sessions: &Arc<SessionManager>, args: &Value) -> Result<S
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({ "closed": true }).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keys(list: &[&str]) -> Vec<Vec<u8>> {
+        let args = json!({ "keys": list });
+        keys_from(&args).expect("keys 应该能解析")
+    }
+
+    #[test]
+    fn single_char_keys_keep_case() {
+        // vim 的 G/O/A/I 区分大小写；曾经全转小写，导致 "G" 变 "g"
+        assert_eq!(keys(&["G"]), vec![b"G".to_vec()]);
+        assert_eq!(keys(&["g"]), vec![b"g".to_vec()]);
+        assert_eq!(keys(&["O"]), vec![b"O".to_vec()]);
+        assert_eq!(keys(&[":"]), vec![b":".to_vec()]);
+        assert_eq!(keys(&["~"]), vec![b"~".to_vec()]);
+    }
+
+    #[test]
+    fn escape_g_o_stays_three_keys() {
+        let parsed = keys(&["Escape", "G", "o"]);
+        assert_eq!(parsed.len(), 3, "每个按键应该单独一份字节");
+        assert_eq!(parsed[0], vec![0x1b]);
+        assert_eq!(parsed[1], b"G".to_vec());
+        assert_eq!(parsed[2], b"o".to_vec());
+    }
+
+    #[test]
+    fn named_keys_are_case_insensitive() {
+        assert_eq!(keys(&["escape"]), keys(&["Escape"]));
+        assert_eq!(keys(&["ENTER"]), vec![b"\r".to_vec()]);
+        assert_eq!(keys(&["esc"]), vec![vec![0x1b]]);
+    }
+
+    #[test]
+    fn control_keys_map_to_bytes() {
+        assert_eq!(keys(&["C-c"]), vec![vec![0x03]]);
+        assert_eq!(keys(&["C-a"]), vec![vec![0x01]]);
+        // C-[ 等价 ESC；这里确保没有被单字符分支提前吃掉
+        assert_eq!(keys(&["C-["]), vec![vec![0x1b]]);
+    }
+
+    #[test]
+    fn unknown_key_is_rejected() {
+        let args = json!({ "keys": ["NotAKey"] });
+        assert!(keys_from(&args).is_err());
+    }
+
+    #[test]
+    fn gap_defaults_and_clamps() {
+        assert_eq!(
+            key_gap_from(&json!({})),
+            Duration::from_millis(DEFAULT_KEY_GAP_MS)
+        );
+        assert_eq!(key_gap_from(&json!({ "intervalMs": 0 })), Duration::ZERO);
+        // 上限 5s，避免误传大值把请求拖死
+        assert_eq!(
+            key_gap_from(&json!({ "intervalMs": 99999 })),
+            Duration::from_millis(5000)
+        );
+    }
 }

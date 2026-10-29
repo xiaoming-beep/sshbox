@@ -53,9 +53,17 @@ wait_for     { sessionId, kind: "pattern", pattern: "assword" }
 send_key { sessionId, keys: ["C-c"] }                  // 中断
 send_key { sessionId, keys: ["Escape", ":", "q", "Enter"] }   // vim 退出
 send_key { sessionId, keys: ["Up"] }                   // 历史命令
+send_key { sessionId, keys: ["Escape", "G", "o"] }             // vim 末行新开一行
 ```
 
 支持：`C-a`..`C-z`、`Escape`、`Enter`、`Tab`、`Backspace`、`Up/Down/Left/Right`、`Home/End`、`PageUp/PageDown`、`Delete`、`Space`。
+
+两个要点：
+
+- **单字符按键保留大小写**：`"G"` 就是大写 G（vim 的 `G`/`O`/`A`/`I` 都区分大小写）。
+- **按键逐个发送**，默认间隔 30ms；单独的 `Escape` 后面至少等 120ms，
+  避免 TUI 把 `ESC` + 下一个字符合成为 Alt 组合键。
+  需要更慢就传 `intervalMs`（毫秒，最大 5000，0 = 不等待）。
 
 ### 全屏程序（vim / less / top / tmux）
 
