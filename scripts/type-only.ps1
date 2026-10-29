@@ -1,8 +1,18 @@
 param(
     [string]$Text = 'uname -a{ENTER}',
-    [string]$Out = 'C:\Users\Administrator\Documents\ssh-box\logs\shot-cmd.png',
+    [string]$Out = '',
     [int]$WaitSeconds = 3
 )
+
+# Default output goes to <repo>\logs\ and the folder is created on demand,
+# so this script works on any machine (ASCII-only on purpose).
+if (-not $Out) {
+    $Out = Join-Path (Split-Path $PSScriptRoot -Parent) 'logs\shot-cmd.png'
+}
+$logDir = Split-Path $Out -Parent
+if ($logDir -and -not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+}
 
 # Activate the SSH Box window and type into the focused terminal, then screenshot.
 # ASCII-only on purpose: PowerShell 5.1 misparses BOM-less UTF-8 scripts.

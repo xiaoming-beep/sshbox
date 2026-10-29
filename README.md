@@ -23,9 +23,14 @@
 
 ## 运行桌面端
 
+前置：按下面的「开发环境」装好 Rust MSVC / Node / VS Build Tools / pnpm（Windows 11 自带 WebView2）。
+
 ```powershell
-# 1) 构建前端资源（Tauri 会把 dist 内嵌进 exe）
+# 0) 首次/换机器：安装前端依赖（仓库不带 node_modules）
 cd apps\desktop
+pnpm install
+
+# 1) 构建前端资源（Tauri 会把 dist 内嵌进 exe）
 pnpm build
 
 # 2) 编译并运行桌面应用
@@ -33,6 +38,8 @@ cd ..\..
 cargo build -p sshbox-desktop
 .\target\debug\sshbox-desktop.exe
 ```
+
+首次 `cargo build` 要拉依赖并编 russh/tauri，几分钟起步；之后增量很快。
 
 窗口里：左侧「+ 新建」添加连接 → 双击连接开会话 → 顶部标签切换 → 右侧终端直接敲命令。
 密码写进 Windows 凭据管理器；配置文件 `%APPDATA%\sshbox\connections.json` 里只有 `credentialRef`。

@@ -1,8 +1,18 @@
 param(
     [int]$Dx = 93,
     [int]$Dy = 145,
-    [string]$Out = 'C:\Users\Administrator\Documents\ssh-box\logs\screen3.png'
+    [string]$Out = ''
 )
+
+# Default output goes to <repo>\logs\ and the folder is created on demand,
+# so this script works on any machine (ASCII-only on purpose).
+if (-not $Out) {
+    $Out = Join-Path (Split-Path $PSScriptRoot -Parent) 'logs\screen3.png'
+}
+$logDir = Split-Path $Out -Parent
+if ($logDir -and -not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+}
 
 # ASCII-only on purpose: PowerShell 5.1 misparses BOM-less UTF-8 scripts.
 Add-Type -AssemblyName System.Windows.Forms
