@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod credential;
+pub mod db;
 pub mod error;
 pub mod known_hosts;
 pub mod manager;
@@ -13,7 +14,8 @@ pub mod osc;
 pub mod pty;
 pub mod sftp;
 
-pub use config::{AppPaths, AuthKind, Connection, ConnectionStore};
+pub use config::{AppPaths, AuthKind, Connection, ConnectionStore, Folder};
+pub use db::Db;
 pub use error::{Error, Result};
 pub use known_hosts::KnownHosts;
 pub use manager::{CommandRecord, InputSource, ProbeInfo, ScreenSnapshot, SessionEvent, SessionInfo, SessionManager, TerminalState};

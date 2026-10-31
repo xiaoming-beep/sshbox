@@ -16,6 +16,7 @@ use vt100::Parser;
 
 use crate::config::{AppPaths, Connection, ConnectionStore};
 use crate::credential;
+use crate::db::Db;
 use crate::error::{Error, Result};
 use crate::known_hosts::KnownHosts;
 use crate::osc::{Osc133, OscScanner};
@@ -35,6 +36,9 @@ static FILE_SEQ: AtomicU64 = AtomicU64::new(1);
 const BACKLOG_LIMIT: usize = 256 * 1024;
 
 static CMD_SEQ: AtomicU64 = AtomicU64::new(1);
+
+/// 日志批量落库间隔（1 分钟）
+const FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 
 fn unix_millis() -> u64 {
     SystemTime::now()
@@ -238,27 +242,98 @@ pub(crate) struct Entry {
     file_history: Arc<Mutex<Vec<FileOpRecord>>>,
 }
 
+/// 待落库的日志缓冲（命令 + 文件操作），由定时任务批量写入 SQLite
+#[derive(Default)]
+struct LogBuffer {
+    commands: Vec<CommandRecord>,
+    file_ops: Vec<FileOpRecord>,
+}
+
 pub struct SessionManager {
     paths: AppPaths,
     pub(crate) sessions: RwLock<HashMap<String, Entry>>,
     pub(crate) events: broadcast::Sender<SessionEvent>,
     /// 串行化 open，避免并发调用重复建会话
     open_lock: tokio::sync::Mutex<()>,
+    /// SQLite 数据库句柄（连接/文件夹/日志）
+    db: Db,
+    /// 待落库日志缓冲
+    log_buffer: std::sync::Mutex<LogBuffer>,
 }
 
 impl SessionManager {
     pub fn new(paths: AppPaths) -> Arc<Self> {
         let (events, _) = broadcast::channel(1024);
-        Arc::new(Self {
+        let db = Db::open(&paths.root).expect("打开 SQLite 数据库失败");
+        // 启动时清一次过期日志
+        let _ = db.prune_logs();
+
+        let manager = Arc::new(Self {
             paths,
             sessions: RwLock::new(HashMap::new()),
             events,
             open_lock: tokio::sync::Mutex::new(()),
-        })
+            db,
+            log_buffer: std::sync::Mutex::new(LogBuffer::default()),
+        });
+
+        // 定时任务：每分钟把缓冲日志落库，并顺带清理过期日志
+        let flush_handle = Arc::clone(&manager);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(FLUSH_INTERVAL);
+            interval.tick().await; // 第一个 tick 立即触发
+            loop {
+                interval.tick().await;
+                flush_handle.flush_logs();
+            }
+        });
+
+        manager
     }
 
     pub fn paths(&self) -> &AppPaths {
         &self.paths
+    }
+
+    /// 数据库句柄（供连接/文件夹读写）
+    pub fn db(&self) -> &Db {
+        &self.db
+    }
+
+    /// 立即把缓冲里的日志写进 SQLite（定时任务与退出时调用）
+    fn flush_logs(&self) {
+        let mut buffer = match self.log_buffer.lock() {
+            Ok(buffer) => buffer,
+            Err(_) => return,
+        };
+        if !buffer.commands.is_empty() {
+            if let Err(e) = self.db.insert_commands(&buffer.commands) {
+                eprintln!("[db] 命令日志落库失败：{e}");
+            }
+            buffer.commands.clear();
+        }
+        if !buffer.file_ops.is_empty() {
+            if let Err(e) = self.db.insert_file_ops(&buffer.file_ops) {
+                eprintln!("[db] 文件操作日志落库失败：{e}");
+            }
+            buffer.file_ops.clear();
+        }
+        // 顺带清理过期日志（每分钟一次，成本可忽略）
+        self.db.prune_logs();
+    }
+
+    /// 记录一条命令到缓冲（由 run_session 与 record_file_op 调用）
+    fn buffer_command(&self, record: &CommandRecord) {
+        if let Ok(mut buffer) = self.log_buffer.lock() {
+            buffer.commands.push(record.clone());
+        }
+    }
+
+    /// 记录一次文件操作到缓冲
+    fn buffer_file_op(&self, record: &FileOpRecord) {
+        if let Ok(mut buffer) = self.log_buffer.lock() {
+            buffer.file_ops.push(record.clone());
+        }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
@@ -512,7 +587,9 @@ impl SessionManager {
         drop(list);
 
         // 推给界面（AI 做过的文件操作，人能实时看到）
-        let _ = self.events.send(SessionEvent::FileOp(record));
+        let _ = self.events.send(SessionEvent::FileOp(record.clone()));
+        // 进落库缓冲（定时批量写 SQLite，带 session_id）
+        self.buffer_file_op(&record);
     }
 
     /// 文件操作历史（新→旧）
@@ -1182,7 +1259,9 @@ async fn run_session(
                                         list.drain(0..drop);
                                     }
                                 }
-                                let _ = events.send(SessionEvent::Command(record));
+                                let _ = events.send(SessionEvent::Command(record.clone()));
+                                // 进落库缓冲
+                                manager.buffer_command(&record);
                             }
                         }
                     }
@@ -1264,7 +1343,9 @@ async fn run_session(
                                     })
                                 });
                                 if let Some(record) = finished {
-                                    let _ = events.send(SessionEvent::CommandFinished(record));
+                                    let _ = events.send(SessionEvent::CommandFinished(record.clone()));
+                                    // 回填退出码/耗时后再落一次库
+                                    manager.buffer_command(&record);
                                 }
                             }
                         }

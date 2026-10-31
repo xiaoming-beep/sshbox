@@ -51,7 +51,8 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
   const [history, setHistory] = useState<string[]>([]);
   const [selected, setSelected] = useState<SftpEntry | null>(null);
   const [writeRoot, setWriteRoot] = useState<string | null>(null);
-  const [overwrite, setOverwrite] = useState(false);
+  /** 默认允许覆盖已存在的文件（可手动关掉） */
+  const [overwrite, setOverwrite] = useState(true);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +72,11 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
         const listing = await api.sftpList(sessionId, target);
         setEntries(listing.entries);
         setPath(listing.dir);
+        // 浏览到哪，写入权限就跟到哪（同时作为 AI 的可写范围），不再要求逐目录点授权
+        void api
+          .setWriteRoot(sessionId, listing.dir)
+          .then(setWriteRoot)
+          .catch(() => undefined);
         return listing.dir;
       } catch (e) {
         setError(errorText(e));
@@ -107,8 +113,6 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
   useEffect(() => {
     void load(".");
     setHistory([]);
-    setWriteRoot(null);
-    setOverwrite(false);
   }, [load]);
 
   const download = useCallback(
@@ -252,7 +256,7 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
         <button
           className={`btn-ghost ${writeRoot === path ? "active" : ""}`}
           onClick={() => void grantHere()}
-          title="把当前目录设为可写范围（可随时撤销）"
+          title="可写范围默认跟随当前目录；点此可撤销/恢复"
         >
           {writeRoot === path ? "✓ 可写" : "允许写入"}
         </button>
@@ -272,7 +276,7 @@ export default function FileBrowser({ sessionId, onClose }: Props) {
         >
           传目录
         </button>
-        <label className="fb-overwrite" title="默认不覆盖已存在的文件">
+        <label className="fb-overwrite" title="默认覆盖已存在的文件，取消勾选则遇到同名文件报错">
           <input
             type="checkbox"
             checked={overwrite}

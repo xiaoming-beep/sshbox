@@ -175,6 +175,38 @@ body {
   padding: 0 4px;
 }
 
+/* 分组文件夹右键菜单 */
+.ctx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+.ctx-menu {
+  position: fixed;
+  z-index: 91;
+  min-width: 140px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+}
+.ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: inherit;
+}
+.ctx-item:hover {
+  background: var(--accent-soft);
+}
+
 .host-icon {
   font-size: 12px;
   line-height: 1;
@@ -384,13 +416,29 @@ body {
 }
 
 .cmd-panel {
-  flex: 0 0 156px;
-  height: 156px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
   border-top: 1px solid var(--border);
   background: var(--panel);
+}
+
+/* 命令面板与终端之间的拖拽分隔条 */
+.cmd-splitter {
+  flex: 0 0 5px;
+  cursor: row-resize;
+  background: transparent;
+  border-top: 1px solid var(--border);
+}
+.cmd-splitter:hover,
+.cmd-splitter.dragging {
+  background: var(--accent-soft);
+}
+/* 拖拽期间禁止选中文字、且终端 iframe 类区域不抢指针 */
+body.cmd-resizing {
+  user-select: none;
+  cursor: row-resize;
 }
 
 .cmd-head {

@@ -112,7 +112,7 @@ wait_for     { sessionId, kind: "pattern", pattern: "assword" }
 | `sftp_list` | 列远端目录（限授权范围内） |
 | `sftp_stat` | 查看远端文件/目录属性（限授权范围内） |
 | `sftp_read` | 读远端小文件（限授权范围内，默认 64KB 上限） |
-| `sftp_write` | 写远端文件（限授权范围内；覆盖需 overwrite=true） |
+| `sftp_write` | 写远端文件（限授权范围内；默认允许覆盖，overwrite=false 可拒绝） |
 | `sftp_mkdir` | 建远端目录（限授权范围内） |
 | `sftp_remove` | 删除远端文件或空目录（限授权范围内） |
 | `sftp_rename` | 重命名/移动（源与目标都需在授权范围内） |

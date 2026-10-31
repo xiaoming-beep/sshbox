@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::db::Db;
 use crate::error::{Error, Result};
 
 /// 应用数据目录（Windows: %APPDATA%\sshbox）
@@ -47,6 +48,11 @@ impl AppPaths {
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
     }
+
+    /// SQLite 数据库文件
+    pub fn db_file(&self) -> PathBuf {
+        self.root.join("sshbox.db")
+    }
 }
 
 fn default_port() -> u16 {
@@ -83,7 +89,11 @@ pub struct Connection {
     /// 启动命令（代替默认登录 shell），如 `bash`、`tmux new -A -s main`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell_command: Option<String>,
-    /// 分组路径，形如 `自己的服务器/生产`；空字符串表示未分组
+    /// 所属文件夹 id（folders 表主键）。空字符串表示未分组。
+    ///
+    /// 历史遗留：老版本存的是"分组路径字符串"（如 `自己的服务器/生产`），
+    /// 现在改成文件夹 id 后，`ConnectionStore` 会把它映射到 `folders` 表。
+    /// 由于不再兼容老用户，`group` 字段直接承载 folder_id。
     #[serde(default)]
     pub group: String,
     #[serde(default)]
@@ -161,31 +171,53 @@ impl AuthKind {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct ConnectionStore {
+/// 文件夹（分组）记录。独立成表，支持空文件夹、折叠状态持久化。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Folder {
+    pub id: String,
     #[serde(default)]
+    pub parent_id: Option<String>,
+    pub name: String,
+    #[serde(default)]
+    pub collapsed: bool,
+    #[serde(default)]
+    pub sort: i64,
+    #[serde(default)]
+    pub created_at: i64,
+}
+
+/// 连接存储：现在是 SQLite（`Db`）的兼容封装。
+///
+/// 保留 `load(path)` / `save(path)` 的旧签名是为了让 desktop/daemon/cli
+/// 三端的调用代码无需改动；实际数据落在 `path` 同目录下的 `sshbox.db`。
+#[derive(Debug, Clone)]
+pub struct ConnectionStore {
     pub connections: Vec<Connection>,
 }
 
 impl ConnectionStore {
+    /// 从 SQLite 读取全部连接。`path` 通常是 `connections.json` 的旧路径，
+    /// 我们只取它的父目录来定位数据库。
     pub fn load(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let text = fs::read_to_string(path)?;
-        // 记事本保存的 UTF-8 会带 BOM，容忍一下
-        let text = text.trim_start_matches('\u{feff}');
-        serde_json::from_str(text)
-            .map_err(|e| Error::Config(format!("解析 {} 失败：{e}", path.display())))
+        let root = path.parent().unwrap_or(path);
+        let db = Db::open(root)?;
+        let connections = db.list_connections()?;
+        Ok(Self { connections })
     }
 
+    /// 打开底层数据库句柄（新增的读写入口，逐步替代整文件读写）
+    pub fn open_db(path: &Path) -> Result<Db> {
+        let root = path.parent().unwrap_or(path);
+        Db::open(root)
+    }
+
+    /// 把内存里的连接全部写回（兼容旧调用；建议改用 `open_db` + `upsert_connection`）
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+        let db = Self::open_db(path)?;
+        for conn in &self.connections {
+            db.upsert_connection(conn)?;
         }
-        let text = serde_json::to_string_pretty(self)
-            .map_err(|e| Error::Config(format!("序列化连接配置失败：{e}")))?;
-        fs::write(path, text)?;
         Ok(())
     }
 

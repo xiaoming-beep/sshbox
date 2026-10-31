@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { api, errorText, type Connection } from "../api";
+import { api, errorText, type Connection, type Folder } from "../api";
 
 interface Props {
   value: Connection;
   isNew: boolean;
-  groups: string[];
+  folders: Folder[];
   onCancel: () => void;
   onSaved: (conn: Connection) => void;
 }
 
-export default function ConnectionDialog({ value, isNew, groups, onCancel, onSaved }: Props) {
+export default function ConnectionDialog({ value, isNew, folders, onCancel, onSaved }: Props) {
   const [form, setForm] = useState<Connection>({ ...value, group: value.group ?? "" });
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
@@ -95,18 +95,18 @@ export default function ConnectionDialog({ value, isNew, groups, onCancel, onSav
         </div>
 
         <div className="form-row">
-          <label>分组（可选，留空则不分组）</label>
-          <input
-            list="sshbox-groups"
+          <label>分组（可选，未分组则归入「未分组」）</label>
+          <select
             value={form.group ?? ""}
-            placeholder="例如：自己的服务器"
             onChange={(e) => patch({ group: e.target.value })}
-          />
-          <datalist id="sshbox-groups">
-            {groups.map((g) => (
-              <option key={g} value={g} />
+          >
+            <option value="">未分组</option>
+            {folders.map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {folder.name}
+              </option>
             ))}
-          </datalist>
+          </select>
         </div>
 
         <div className="form-grid">

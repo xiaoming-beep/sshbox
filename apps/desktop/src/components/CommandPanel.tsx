@@ -4,6 +4,8 @@ import { api, type CommandRecord, type FileOpRecord } from "../api";
 
 interface Props {
   sessionId: string;
+  /** 面板高度（px），由 App 的拖拽分隔条控制 */
+  height: number;
 }
 
 type Tab = "commands" | "files";
@@ -29,7 +31,7 @@ function bytesOf(count: number): string {
 }
 
 /** 会话下方的两条流水：命令（按行切分）与文件操作（SFTP 审计） */
-export default function CommandPanel({ sessionId }: Props) {
+export default function CommandPanel({ sessionId, height }: Props) {
   const [tab, setTab] = useState<Tab>("commands");
   const [items, setItems] = useState<CommandRecord[]>([]);
   const [files, setFiles] = useState<FileOpRecord[]>([]);
@@ -75,7 +77,7 @@ export default function CommandPanel({ sessionId }: Props) {
   }, [sessionId]);
 
   return (
-    <div className="cmd-panel">
+    <div className="cmd-panel" style={{ height }}>
       <div className="cmd-head">
         <div className="cmd-tabs">
           <button

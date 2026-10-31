@@ -263,7 +263,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "sftp_write",
-            "description": "写远端文件（文本或 base64）。受连接级策略限制：只有配置了可写前缀的路径才允许；已存在且 overwrite 不为 true 时拒绝。",
+            "description": "写远端文件（文本或 base64）。受连接级策略限制：只有配置了可写前缀的路径才允许；默认允许覆盖已存在的文件，传 overwrite=false 可拒绝覆盖。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -271,7 +271,7 @@ fn tool_definitions() -> Vec<Value> {
                     "path": { "type": "string", "description": "绝对路径" },
                     "text": { "type": "string", "description": "文本内容（与 base64 二选一）" },
                     "base64": { "type": "string", "description": "二进制内容的 base64（与 text 二选一）" },
-                    "overwrite": { "type": "boolean", "description": "为 true 时允许覆盖已存在的文件，默认 false" }
+                    "overwrite": { "type": "boolean", "description": "为 false 时拒绝覆盖已存在的文件，默认 true（允许覆盖）" }
                 },
                 "required": ["path"],
                 "additionalProperties": false
@@ -340,7 +340,7 @@ fn tool_definitions() -> Vec<Value> {
                     "sessionId": { "type": "string", "description": "会话 ID；只有一个会话时可省略" },
                     "name": { "type": "string", "description": "暂存区里的文件名" },
                     "remotePath": { "type": "string", "description": "目标绝对路径（需在可写范围内）" },
-                    "overwrite": { "type": "boolean", "description": "已存在时是否覆盖，默认 false" }
+                    "overwrite": { "type": "boolean", "description": "已存在时是否覆盖，默认 true（允许覆盖）" }
                 },
                 "required": ["name", "remotePath"],
                 "additionalProperties": false
@@ -1001,7 +1001,7 @@ async fn sftp_write_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result
     let overwrite = args
         .get("overwrite")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or(true);
 
     let data = match (args.get("base64").and_then(|v| v.as_str()), args.get("text").and_then(|v| v.as_str())) {
         (Some(encoded), _) => base64::engine::general_purpose::STANDARD
@@ -1013,7 +1013,7 @@ async fn sftp_write_tool(sessions: &Arc<SessionManager>, args: &Value) -> Result
 
     if !overwrite && sessions.sftp_exists(&session_id, path).await.map_err(|e| e.to_string())? {
         return Err(format!(
-            "{path} 已存在；如确认覆盖请传 overwrite=true"
+            "{path} 已存在（当前 overwrite=false）；如需覆盖请去掉 overwrite 参数或传 true"
         ));
     }
 
@@ -1120,7 +1120,7 @@ async fn sftp_upload_tool(
     let overwrite = args
         .get("overwrite")
         .and_then(|value| value.as_bool())
-        .unwrap_or(false);
+        .unwrap_or(true);
 
     let local = staging_file(name)?;
     let data = std::fs::read(&local)
@@ -1134,7 +1134,7 @@ async fn sftp_upload_tool(
             .map_err(|e| e.to_string())?
     {
         return Err(format!(
-            "{remote_path} 已存在；确认覆盖请传 overwrite=true"
+            "{remote_path} 已存在（当前 overwrite=false）；如需覆盖请去掉 overwrite 参数或传 true"
         ));
     }
 

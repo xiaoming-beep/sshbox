@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use serde::Serialize;
-use sshcore::config::{AppPaths, Connection, ConnectionStore};
+use sshcore::config::{AppPaths, Connection};
 use sshcore::manager::{AccessSource, CommandRecord, FileOpRecord, InputSource, ProbeInfo, SessionEvent, SessionInfo, SessionManager};
 use sshcore::{credential, Error as CoreError};
 use tauri::{
@@ -66,8 +66,8 @@ type CmdResult<T> = Result<T, CmdError>;
 
 #[tauri::command]
 fn list_connections(state: State<'_, AppState>) -> CmdResult<Vec<Connection>> {
-    let store = ConnectionStore::load(&state.paths.connections_file())?;
-    Ok(store.connections)
+    let db = sshcore::Db::open(&state.paths.root)?;
+    Ok(db.list_connections()?)
 }
 
 #[tauri::command]
@@ -84,29 +84,27 @@ fn save_connection(state: State<'_, AppState>, mut conn: Connection) -> CmdResul
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
 
-    let path = state.paths.connections_file();
-    let mut store = ConnectionStore::load(&path)?;
-    store.upsert(conn.clone());
-    store.save(&path)?;
+    let db = sshcore::Db::open(&state.paths.root)?;
+    db.upsert_connection(&conn)?;
     Ok(conn)
 }
 
 #[tauri::command]
 fn delete_connection(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    let path = state.paths.connections_file();
-    let mut store = ConnectionStore::load(&path)?;
-    if let Ok(conn) = store.get(&id).cloned() {
+    let db = sshcore::Db::open(&state.paths.root)?;
+    if let Some(conn) = db.get_connection(&id)? {
         let _ = credential::delete_secret(&conn.credential_ref);
     }
-    store.remove(&id);
-    store.save(&path)?;
+    db.delete_connection(&id)?;
     Ok(())
 }
 
 #[tauri::command]
 fn set_secret(state: State<'_, AppState>, id: String, secret: String) -> CmdResult<()> {
-    let store = ConnectionStore::load(&state.paths.connections_file())?;
-    let conn = store.get(&id)?.clone();
+    let db = sshcore::Db::open(&state.paths.root)?;
+    let conn = db
+        .get_connection(&id)?
+        .ok_or_else(|| CmdError::Message { message: format!("找不到连接：{id}") })?;
     if secret.is_empty() {
         credential::delete_secret(&conn.credential_ref)?;
     } else {
@@ -117,8 +115,10 @@ fn set_secret(state: State<'_, AppState>, id: String, secret: String) -> CmdResu
 
 #[tauri::command]
 fn has_secret(state: State<'_, AppState>, id: String) -> CmdResult<bool> {
-    let store = ConnectionStore::load(&state.paths.connections_file())?;
-    let conn = store.get(&id)?.clone();
+    let db = sshcore::Db::open(&state.paths.root)?;
+    let conn = db
+        .get_connection(&id)?
+        .ok_or_else(|| CmdError::Message { message: format!("找不到连接：{id}") })?;
     if !conn.auth.needs_secret() {
         return Ok(true);
     }
@@ -128,6 +128,52 @@ fn has_secret(state: State<'_, AppState>, id: String) -> CmdResult<bool> {
 #[tauri::command]
 async fn probe_connection(state: State<'_, AppState>, connection_id: String) -> CmdResult<ProbeInfo> {
     Ok(state.sessions.probe(&connection_id).await?)
+}
+
+// ---------------------------------------------------------------- 文件夹
+
+#[tauri::command]
+fn list_folders(state: State<'_, AppState>) -> CmdResult<Vec<sshcore::Folder>> {
+    let db = sshcore::Db::open(&state.paths.root)?;
+    Ok(db.list_folders()?)
+}
+
+#[tauri::command]
+fn create_folder(
+    state: State<'_, AppState>,
+    parent_id: Option<String>,
+    name: String,
+) -> CmdResult<String> {
+    let db = sshcore::Db::open(&state.paths.root)?;
+    Ok(db.create_folder(parent_id.as_deref(), &name)?)
+}
+
+#[tauri::command]
+fn rename_folder(state: State<'_, AppState>, id: String, name: String) -> CmdResult<bool> {
+    let db = sshcore::Db::open(&state.paths.root)?;
+    Ok(db.rename_folder(&id, &name)?)
+}
+
+#[tauri::command]
+fn delete_folder(state: State<'_, AppState>, id: String) -> CmdResult<bool> {
+    let db = sshcore::Db::open(&state.paths.root)?;
+    Ok(db.delete_folder(&id)?)
+}
+
+#[tauri::command]
+fn set_folder_collapsed(state: State<'_, AppState>, id: String, collapsed: bool) -> CmdResult<bool> {
+    let db = sshcore::Db::open(&state.paths.root)?;
+    Ok(db.set_folder_collapsed(&id, collapsed)?)
+}
+
+#[tauri::command]
+fn set_connection_folder(
+    state: State<'_, AppState>,
+    conn_id: String,
+    folder_id: Option<String>,
+) -> CmdResult<bool> {
+    let db = sshcore::Db::open(&state.paths.root)?;
+    Ok(db.set_connection_folder(&conn_id, folder_id.as_deref())?)
 }
 
 #[tauri::command]
@@ -315,7 +361,8 @@ async fn sftp_write(
             message: format!("base64 解码失败：{err}"),
         })?;
 
-    if !overwrite.unwrap_or(false) && state.sessions.sftp_exists(&id, &path).await? {
+    // 人类操作默认允许覆盖（界面复选框默认勾选，可手动关掉）
+    if !overwrite.unwrap_or(true) && state.sessions.sftp_exists(&id, &path).await? {
         return Err(CmdError::Message {
             message: format!("{path} 已存在，勾选“覆盖”后再上传"),
         });
@@ -601,6 +648,12 @@ pub fn run() {
             set_secret,
             has_secret,
             probe_connection,
+            list_folders,
+            create_folder,
+            rename_folder,
+            delete_folder,
+            set_folder_collapsed,
+            set_connection_folder,
             trust_host,
             forget_host,
             debug_log,

@@ -16,9 +16,19 @@ export interface Connection {
   aiAccess: boolean;
   /** 启动命令（代替默认登录 shell），如 bash、tmux new -A -s main */
   shellCommand?: string | null;
-  /** 分组路径，如 `自己的服务器/生产`；空表示未分组 */
+  /** 所属文件夹 id（folders 表主键）；空字符串表示未分组 */
   group: string;
   tags: string[];
+}
+
+/** 分组文件夹（独立表，支持空文件夹与折叠状态持久化） */
+export interface Folder {
+  id: string;
+  parentId: string | null;
+  name: string;
+  collapsed: boolean;
+  sort: number;
+  createdAt: number;
 }
 
 export type InputSource = "human" | "ai" | "terminal";
@@ -128,6 +138,16 @@ export const api = {
   trustHost: (host: string, port: number, fingerprint: string) =>
     invoke<void>("trust_host", { host, port, fingerprint }),
   forgetHost: (host: string, port: number) => invoke<boolean>("forget_host", { host, port }),
+
+  listFolders: () => invoke<Folder[]>("list_folders"),
+  createFolder: (parentId: string | null, name: string) =>
+    invoke<string>("create_folder", { parentId, name }),
+  renameFolder: (id: string, name: string) => invoke<boolean>("rename_folder", { id, name }),
+  deleteFolder: (id: string) => invoke<boolean>("delete_folder", { id }),
+  setFolderCollapsed: (id: string, collapsed: boolean) =>
+    invoke<boolean>("set_folder_collapsed", { id, collapsed }),
+  setConnectionFolder: (connId: string, folderId: string | null) =>
+    invoke<boolean>("set_connection_folder", { connId, folderId }),
 
   listSessions: () => invoke<SessionInfo[]>("list_sessions"),
   daemonInfo: () => invoke<DaemonInfo>("daemon_info"),

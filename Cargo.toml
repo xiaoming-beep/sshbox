@@ -28,3 +28,5 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
+# 连接/文件夹/日志统一存 SQLite；bundled 编译进 libsqlite3，免装运行时
+rusqlite = { version = "0.32", features = ["bundled"] }
